@@ -34,6 +34,7 @@ fun NerdIcon(
     tint: Color = LocalContentColor.current,
     size: Dp = 24.dp,
 ) {
+    val fontSize = with(LocalDensity.current) { size.toSp() }
     Box(
         modifier = modifier
             .size(size)
@@ -49,15 +50,15 @@ fun NerdIcon(
     ) {
         Text(
             text = glyph,
-            color = tint,
-            fontFamily = NerdFontFamily,
-            fontSize = with(LocalDensity.current) { size.toSp() },
             textAlign = TextAlign.Center,
             style = TextStyle(
                 color = tint,
                 fontFamily = NerdFontFamily,
-                fontSize = with(LocalDensity.current) { size.toSp() },
-                lineHeight = with(LocalDensity.current) { size.toSp() },
+                fontSize = fontSize,
+                // lineHeight = fontSize keeps the glyph centered within `size`
+                // (default lineHeight adds ascent/descent padding that pushes
+                // it off-center).
+                lineHeight = fontSize,
             ),
         )
     }

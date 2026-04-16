@@ -43,6 +43,7 @@ android {
 
     // Output `simpssh-<version>-<buildType>.apk` instead of the default
     // `app-<buildType>.apk` so shared APKs are self-describing.
+    @Suppress("UnstableApiUsage")
     applicationVariants.all {
         outputs.all {
             (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
