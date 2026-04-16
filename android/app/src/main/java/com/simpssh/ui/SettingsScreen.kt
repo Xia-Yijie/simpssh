@@ -21,6 +21,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -42,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -121,12 +123,19 @@ fun SettingsScreen(
 
 @Composable
 private fun SectionHeader(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
-    )
+    Column(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 6.dp)) {
+        Text(
+            text,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(6.dp))
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+            thickness = 1.dp,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -147,49 +156,99 @@ private fun ThemeRow(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(modifier = Modifier.padding(end = 12.dp)) {
-                Swatch(palette.primary)
-                Spacer(Modifier.width(6.dp))
-                Swatch(palette.primaryContainer)
-                Spacer(Modifier.width(6.dp))
-                Swatch(palette.darkBackground)
-            }
-            Column(Modifier.weight(1f)) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     palette.displayName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (onEdit != null) {
+                    IconButton(onClick = onEdit) {
+                        NerdIcon(NerdGlyphs.PENCIL, "编辑", size = 18.dp)
+                    }
+                }
+                if (onDelete != null) {
+                    IconButton(onClick = onDelete) {
+                        NerdIcon(
+                            NerdGlyphs.TRASH, "删除",
+                            size = 18.dp,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                RadioButton(selected = selected, onClick = onClick)
+            }
+            Spacer(Modifier.height(8.dp))
+            TerminalPreview(palette)
+        }
+    }
+}
+
+/// Mini terminal mock-up so users can see what a palette actually feels
+/// like — themed window chrome (3 dots), prompt in primary colour, command
+/// echo in default fg, output in dim fg, all on the dark background.
+@Composable
+private fun TerminalPreview(palette: ThemePalette) {
+    val fg = bestForeground(palette.darkBackground)
+    val dimFg = fg.copy(alpha = 0.65f)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .background(palette.darkBackground),
+    ) {
+        // Title bar with three dots
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(palette.darkSurfaceVariant)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Dot(Color(0xFFFF5F56))
+            Spacer(Modifier.width(4.dp))
+            Dot(Color(0xFFFFBD2E))
+            Spacer(Modifier.width(4.dp))
+            Dot(Color(0xFF27C93F))
+        }
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row {
+                Text("$", color = palette.primary, fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(6.dp))
+                Text("ls -la", color = fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            }
+            Text(
+                "drwxr-xr-x  src/",
+                color = dimFg, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            )
+            Text(
+                "-rw-r--r--  README.md",
+                color = dimFg, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            )
+            Row {
+                Text("$", color = palette.primary, fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(6.dp))
+                // Tail block-cursor
+                Box(
+                    modifier = Modifier
+                        .size(width = 7.dp, height = 14.dp)
+                        .background(fg),
                 )
             }
-            if (onEdit != null) {
-                IconButton(onClick = onEdit) {
-                    NerdIcon(NerdGlyphs.PENCIL, "编辑", size = 18.dp)
-                }
-            }
-            if (onDelete != null) {
-                IconButton(onClick = onDelete) {
-                    NerdIcon(
-                        NerdGlyphs.TRASH, "删除",
-                        size = 18.dp,
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-            RadioButton(selected = selected, onClick = onClick)
         }
     }
 }
 
 @Composable
-private fun Swatch(c: Color) {
+private fun Dot(c: Color) {
     Box(
         modifier = Modifier
-            .size(24.dp)
-            .clip(MaterialTheme.shapes.small)
+            .size(8.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
             .background(c),
     )
 }

@@ -31,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -97,27 +98,21 @@ fun ServerListScreen(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ExtendedFloatingActionButton(
+                AlignedFab(
+                    glyph = NerdGlyphs.PLUS,
+                    label = "添加服务器",
                     onClick = onAdd,
-                    icon = { NerdIcon(NerdGlyphs.PLUS, null, size = 20.dp) },
-                    text = { Text("添加服务器") },
-                    modifier = Modifier.widthIn(min = 180.dp),
+                    primary = true,
                 )
-                ExtendedFloatingActionButton(
+                AlignedFab(
+                    glyph = NerdGlyphs.HELP,
+                    label = "操作指南",
                     onClick = { showGuide = true },
-                    icon = { NerdIcon(NerdGlyphs.HELP, null, size = 20.dp) },
-                    text = { Text("操作指南") },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.widthIn(min = 180.dp),
                 )
-                ExtendedFloatingActionButton(
+                AlignedFab(
+                    glyph = NerdGlyphs.COG,
+                    label = "设置",
                     onClick = onShowSettings,
-                    icon = { NerdIcon(NerdGlyphs.COG, null, size = 20.dp) },
-                    text = { Text("设置") },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.widthIn(min = 180.dp),
                 )
             }
         },
@@ -148,6 +143,38 @@ fun ServerListScreen(
     }
 
     if (showGuide) GuideDialog(onDismiss = { showGuide = false })
+}
+
+/// FAB whose [Icon][Label] content is forced to start-align inside a fixed
+/// 200dp width, so multiple FABs stacked together have their icons in
+/// the same X column regardless of label length.
+@Composable
+private fun AlignedFab(
+    glyph: String,
+    label: String,
+    onClick: () -> Unit,
+    primary: Boolean = false,
+) {
+    val container = if (primary) MaterialTheme.colorScheme.primaryContainer
+    else MaterialTheme.colorScheme.surfaceVariant
+    val content = if (primary) MaterialTheme.colorScheme.onPrimaryContainer
+    else MaterialTheme.colorScheme.onSurfaceVariant
+
+    FloatingActionButton(
+        onClick = onClick,
+        containerColor = container,
+        contentColor = content,
+        modifier = Modifier.width(200.dp).height(56.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NerdIcon(glyph, null, size = 20.dp, tint = content)
+            Spacer(Modifier.width(12.dp))
+            Text(label, style = MaterialTheme.typography.titleSmall)
+        }
+    }
 }
 
 @Composable
