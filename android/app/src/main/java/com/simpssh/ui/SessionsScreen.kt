@@ -16,6 +16,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -138,9 +150,9 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
 
         Box(modifier = Modifier.fillMaxSize()) {
             when (tab.view) {
-                TabState.View.Terminal -> ShellBody(tab, onSend = { line ->
-                    manager.send(tab.id, line.toByteArray())
-                })
+                TabState.View.Terminal -> ShellBody(tab) { bytes ->
+                    manager.send(tab.id, bytes)
+                }
                 TabState.View.Files -> FilesBody(tab, manager)
             }
         }
@@ -148,7 +160,7 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
 }
 
 @Composable
-private fun ShellBody(tab: TabState, onSend: (String) -> Unit) {
+private fun ShellBody(tab: TabState, onSendBytes: (ByteArray) -> Unit) {
     val listState = rememberLazyListState()
     LaunchedEffect(tab.rows.size) {
         if (tab.rows.isNotEmpty()) {
@@ -190,28 +202,108 @@ private fun ShellBody(tab: TabState, onSend: (String) -> Unit) {
                 }
             }
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
-            var input by remember(tab.id) { mutableStateOf("") }
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("命令行（Enter 发送）") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(
-                    onSend = {
-                        onSend(input + "\r")
-                        input = ""
-                    },
-                ),
-            )
-        }
+        TerminalInput(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            onSendBytes = onSendBytes,
+        )
         Text(
             "光标 ${tab.cursor}",
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )
+    }
+}
+
+/// Per-keystroke input for the terminal.
+///
+/// We never display what the user types in this field — the local text style
+/// is transparent so they only see characters echoed back from the remote
+/// shell. The local TextFieldValue is used purely as a "shadow" so the IME
+/// has something to delete with Backspace; on every change we diff old vs
+/// new and send the delta as bytes.
+///
+/// Hardware keyboard special keys (Esc / Tab / arrows / Ctrl-letter) are
+/// caught via `onPreviewKeyEvent` and translated to the matching escape
+/// sequences. Soft keyboards usually lack these, so for now those operations
+/// require a hardware keyboard.
+@Composable
+private fun TerminalInput(
+    modifier: Modifier = Modifier,
+    onSendBytes: (ByteArray) -> Unit,
+) {
+    var shadow by remember { mutableStateOf(TextFieldValue("")) }
+
+    OutlinedTextField(
+        value = shadow,
+        onValueChange = { new ->
+            val oldText = shadow.text
+            val newText = new.text
+            if (newText != oldText) {
+                val common = commonPrefixLen(oldText, newText)
+                val toDelete = oldText.length - common
+                val toAdd = newText.substring(common)
+                if (toDelete > 0) onSendBytes(ByteArray(toDelete) { 0x7F })
+                if (toAdd.isNotEmpty()) onSendBytes(toAdd.toByteArray())
+            }
+            shadow = new
+        },
+        modifier = modifier.onPreviewKeyEvent { ev ->
+            if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            val bytes = specialKeyBytes(ev) ?: return@onPreviewKeyEvent false
+            onSendBytes(bytes)
+            true
+        },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.Transparent),
+        placeholder = { Text("点这里调出键盘 — 按键即发送") },
+        keyboardOptions = KeyboardOptions(
+            autoCorrect = false,
+            capitalization = KeyboardCapitalization.None,
+            keyboardType = KeyboardType.Ascii,
+            imeAction = ImeAction.Send,
+        ),
+        keyboardActions = KeyboardActions(onSend = {
+            onSendBytes(byteArrayOf('\r'.code.toByte()))
+            shadow = TextFieldValue("")
+        }),
+    )
+}
+
+private fun commonPrefixLen(a: String, b: String): Int {
+    var i = 0
+    val n = minOf(a.length, b.length)
+    while (i < n && a[i] == b[i]) i++
+    return i
+}
+
+private fun specialKeyBytes(ev: KeyEvent): ByteArray? {
+    // Hardware keyboard special keys → ANSI/VT escape sequences.
+    return when (ev.key) {
+        Key.DirectionUp    -> "\u001B[A".toByteArray()
+        Key.DirectionDown  -> "\u001B[B".toByteArray()
+        Key.DirectionRight -> "\u001B[C".toByteArray()
+        Key.DirectionLeft  -> "\u001B[D".toByteArray()
+        Key.Escape         -> byteArrayOf(0x1B)
+        Key.Tab            -> byteArrayOf(0x09)
+        Key.Backspace      -> byteArrayOf(0x7F)
+        Key.MoveHome       -> "\u001B[H".toByteArray()
+        Key.MoveEnd        -> "\u001B[F".toByteArray()
+        Key.Delete         -> "\u001B[3~".toByteArray()
+        Key.PageUp         -> "\u001B[5~".toByteArray()
+        Key.PageDown       -> "\u001B[6~".toByteArray()
+        else -> {
+            if (ev.isCtrlPressed) {
+                val cp = ev.utf16CodePoint
+                when (cp) {
+                    in 'a'.code..'z'.code -> byteArrayOf((cp - 'a'.code + 1).toByte())
+                    in 'A'.code..'Z'.code -> byteArrayOf((cp - 'A'.code + 1).toByte())
+                    '['.code -> byteArrayOf(0x1B)             // Ctrl+[ == Esc
+                    '\\'.code -> byteArrayOf(0x1C)
+                    ']'.code -> byteArrayOf(0x1D)
+                    else -> null
+                }
+            } else null
+        }
     }
 }
