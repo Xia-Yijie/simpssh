@@ -11,11 +11,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use russh::client::{self, Handler};
-use russh::keys::ssh_key::PublicKey;
+use russh::client;
 use russh::{ChannelId, ChannelMsg, Disconnect};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+
+use crate::auth::AcceptAny;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum SshError {
@@ -32,20 +33,6 @@ pub enum SshError {
 impl From<russh::Error> for SshError {
     fn from(e: russh::Error) -> Self {
         SshError::Connect { msg: e.to_string() }
-    }
-}
-
-/// Accept-any host-key handler. MVP only.
-struct AcceptAny;
-
-impl Handler for AcceptAny {
-    type Error = russh::Error;
-
-    async fn check_server_key(
-        &mut self,
-        _server_public_key: &PublicKey,
-    ) -> Result<bool, Self::Error> {
-        Ok(true)
     }
 }
 

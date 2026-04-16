@@ -8,6 +8,7 @@
 
 uniffi::setup_scaffolding!();
 
+mod auth;
 mod sftp;
 mod ssh;
 mod terminal;

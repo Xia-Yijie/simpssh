@@ -20,9 +20,6 @@ import uniffi.simpssh_core.SshSession
 import uniffi.simpssh_core.TerminalView
 import java.util.UUID
 
-private const val DEFAULT_COLS: UShort = 80u
-private const val DEFAULT_ROWS: UShort = 24u
-
 /// One tab = one session = one connection to a server, holding both a
 /// shell channel and (lazily) an SFTP channel. The UI switches between
 /// the two views without opening a new tab.
@@ -79,10 +76,10 @@ class SessionManager(private val scope: CoroutineScope) {
                 port = tab.server.port.toUShort(),
                 user = tab.server.user,
                 password = tab.server.password,
-                cols = DEFAULT_COLS,
-                rows = DEFAULT_ROWS,
+                cols = DEFAULT_TERM_COLS,
+                rows = DEFAULT_TERM_ROWS,
             )
-            val t = TerminalView(DEFAULT_COLS, DEFAULT_ROWS)
+            val t = TerminalView(DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)
             tab.sshSession = s
             tab.term = t
             withContext(Dispatchers.Main) { tab.shellStatus = "已连接" }
@@ -99,21 +96,24 @@ class SessionManager(private val scope: CoroutineScope) {
 
             tab.readerJob = scope.launch(Dispatchers.IO) {
                 while (true) {
-                    val chunk = runCatching { s.read(200u) }.getOrNull() ?: break
+                    val chunk = runCatching { s.read(SHELL_READ_TIMEOUT_MS) }.getOrNull() ?: break
                     if (chunk.isNotEmpty()) {
                         t.feed(chunk)
                         val snap = t.snapshot()
                         val cur = t.cursor()
+                        val cursorStr = "(${cur.row},${cur.col})"
                         withContext(Dispatchers.Main) {
                             tab.rows.clear()
                             tab.rows.addAll(snap)
-                            tab.cursor = "(${cur.row},${cur.col})"
+                            // Skip the assignment when nothing changed so Compose
+                            // doesn't recompose the cursor display.
+                            if (cursorStr != tab.cursor) tab.cursor = cursorStr
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            withContext(Dispatchers.Main) { tab.shellStatus = "连接失败: ${e.message}" }
+            withContext(Dispatchers.Main) { tab.shellStatus = formatError("连接", e) }
         }
     }
 
@@ -166,7 +166,7 @@ class SessionManager(private val scope: CoroutineScope) {
                 loadChildren(tab, home)
             }
         } catch (e: Exception) {
-            withContext(Dispatchers.Main) { tab.filesStatus = "连接失败: ${e.message}" }
+            withContext(Dispatchers.Main) { tab.filesStatus = formatError("连接", e) }
         } finally {
             tab.filesConnecting = false
         }
@@ -178,7 +178,7 @@ class SessionManager(private val scope: CoroutineScope) {
             val list = withContext(Dispatchers.IO) { s.listDir(path) }
             withContext(Dispatchers.Main) { tab.childrenByPath[path] = list }
         } catch (e: Exception) {
-            withContext(Dispatchers.Main) { tab.filesStatus = "读取失败: ${e.message}" }
+            withContext(Dispatchers.Main) { tab.filesStatus = formatError("读取", e) }
         }
     }
 
@@ -200,7 +200,7 @@ class SessionManager(private val scope: CoroutineScope) {
         loadChildren(tab, path)
     }
 
-    suspend fun readFileBytes(tab: TabState, path: String, max: Int = 256 * 1024): ByteArray? {
+    suspend fun readFileBytes(tab: TabState, path: String, max: Int = PREVIEW_MAX_BYTES): ByteArray? {
         val s = tab.sftp ?: return null
         return withContext(Dispatchers.IO) {
             runCatching { s.readFile(path, 0u, max.toUInt()) }.getOrNull()

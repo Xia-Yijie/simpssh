@@ -213,12 +213,11 @@ private fun ShellBody(tab: TabState, onSend: (String) -> Unit) {
                 ),
             )
         }
-        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Text(
-                "光标 ${tab.cursor}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            )
-        }
+        Text(
+            "光标 ${tab.cursor}",
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
     }
 }

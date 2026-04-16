@@ -8,12 +8,13 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use russh::client::{self, Handler};
-use russh::keys::ssh_key::PublicKey;
+use russh::client;
 use russh_sftp::client::SftpSession as SftpInner;
 use russh_sftp::protocol::{FileType, OpenFlags};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use tokio::runtime::Runtime;
+
+use crate::auth::AcceptAny;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum SftpError {
@@ -40,18 +41,6 @@ pub struct DirEntry {
     pub is_link: bool,
     /// Octal permission bits (e.g. 0o644). 0 if unknown.
     pub mode: u32,
-}
-
-struct AcceptAny;
-
-impl Handler for AcceptAny {
-    type Error = russh::Error;
-    async fn check_server_key(
-        &mut self,
-        _server_public_key: &PublicKey,
-    ) -> Result<bool, Self::Error> {
-        Ok(true)
-    }
 }
 
 #[derive(uniffi::Object)]

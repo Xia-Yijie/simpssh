@@ -84,7 +84,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
         pendingDownload = null
         if (uri == null || target == null) return@rememberLauncherForActivityResult
         scope.launch {
-            val bytes = manager.readFileBytes(tab, target.path, max = 16 * 1024 * 1024) ?: return@launch
+            val bytes = manager.readFileBytes(tab, target.path, max = DOWNLOAD_MAX_BYTES) ?: return@launch
             withContext(Dispatchers.IO) {
                 runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } }
             }
@@ -107,7 +107,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
             val dest = joinPath(destDir, name)
             val err = manager.writeFileBytes(tab, dest, bytes)
             withContext(Dispatchers.Main) {
-                tab.filesStatus = if (err == null) "已上传 → $dest" else "上传失败: ${err.message}"
+                tab.filesStatus = if (err == null) "已上传 → $dest" else formatError("上传", err)
             }
             manager.loadChildren(tab, destDir)
         }
@@ -199,7 +199,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                         scope.launch {
                             val err = manager.delete(tab, row.entry)
                             if (err == null) manager.loadChildren(tab, parentOf(row.entry.path))
-                            else withContext(Dispatchers.Main) { tab.filesStatus = "删除失败: ${err.message}" }
+                            else withContext(Dispatchers.Main) { tab.filesStatus = formatError("删除", err) }
                         }
                     },
                 )
@@ -240,7 +240,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 scope.launch {
                     val err = manager.mkdir(tab, joinPath(parent, name))
                     if (err == null) manager.loadChildren(tab, parent)
-                    else withContext(Dispatchers.Main) { tab.filesStatus = "创建失败: ${err.message}" }
+                    else withContext(Dispatchers.Main) { tab.filesStatus = formatError("创建", err) }
                 }
             },
         )
@@ -262,7 +262,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 scope.launch {
                     val err = manager.rename(tab, entry.path, to)
                     if (err == null) manager.loadChildren(tab, parent)
-                    else withContext(Dispatchers.Main) { tab.filesStatus = "重命名失败: ${err.message}" }
+                    else withContext(Dispatchers.Main) { tab.filesStatus = formatError("重命名", err) }
                 }
             },
         )
@@ -303,7 +303,7 @@ private fun TreeRowView(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = { menu = true })
-            .padding(start = (8 + depth * 16).dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = (8 + depth * TREE_INDENT_DP).dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Chevron column (only for dirs; files get matching width to align)
