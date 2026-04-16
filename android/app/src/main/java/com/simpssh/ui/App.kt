@@ -53,11 +53,7 @@ fun App() {
                 onAdd = { screen = Screen.Edit(id = null) },
                 onEdit = { screen = Screen.Edit(it.id) },
                 onConnect = { server, script ->
-                    sessions.openShell(server, script)
-                    screen = Screen.Sessions
-                },
-                onOpenFiles = { server ->
-                    sessions.openFiles(server)
+                    sessions.open(server, script)
                     screen = Screen.Sessions
                 },
                 onShowSessions = { screen = Screen.Sessions },

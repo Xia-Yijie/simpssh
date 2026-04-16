@@ -8,6 +8,8 @@ import java.util.UUID
 data class InitScript(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
+    /// Where shell `cd`s and where SFTP opens. Empty = home.
+    val workingDir: String = "",
     val content: String,
 )
 
@@ -61,6 +63,7 @@ private fun JSONObject.toServer(): Server {
         InitScript(
             id = so.optString("id", UUID.randomUUID().toString()),
             name = so.optString("name", "脚本"),
+            workingDir = so.optString("workingDir", ""),
             content = so.optString("content", ""),
         )
     }
@@ -87,6 +90,7 @@ private fun Server.toJson(): JSONObject = JSONObject().apply {
         arr.put(JSONObject().apply {
             put("id", s.id)
             put("name", s.name)
+            put("workingDir", s.workingDir)
             put("content", s.content)
         })
     }

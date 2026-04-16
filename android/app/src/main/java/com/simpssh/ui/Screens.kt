@@ -83,7 +83,6 @@ fun ServerListScreen(
     onAdd: () -> Unit,
     onEdit: (Server) -> Unit,
     onConnect: (server: Server, script: InitScript?) -> Unit,
-    onOpenFiles: (server: Server) -> Unit,
     onShowSessions: () -> Unit,
 ) {
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
@@ -145,7 +144,6 @@ fun ServerListScreen(
                         onToggle = { expanded[s.id] = !(expanded[s.id] ?: false) },
                         onLongPress = { onEdit(s) },
                         onConnect = { script -> onConnect(s, script) },
-                        onOpenFiles = { onOpenFiles(s) },
                     )
                 }
             }
@@ -188,7 +186,6 @@ private fun ServerCard(
     onToggle: () -> Unit,
     onLongPress: () -> Unit,
     onConnect: (InitScript?) -> Unit,
-    onOpenFiles: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -252,52 +249,8 @@ private fun ServerCard(
                             onConnect = { onConnect(script) },
                         )
                     }
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
-                    FilesOption(onOpen = onOpenFiles)
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun FilesOption(onOpen: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpen)
-            .padding(start = 28.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Default.Folder,
-            null,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(
-            "文件浏览器 (SFTP)",
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        FilledTonalIconButton(
-            onClick = onOpen,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ),
-            modifier = Modifier.size(36.dp),
-        ) {
-            Icon(
-                Icons.Default.PlayArrow,
-                "打开",
-                modifier = Modifier.size(20.dp),
-            )
         }
     }
 }
@@ -459,7 +412,7 @@ fun ServerEditScreen(
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Text("初始化脚本", style = MaterialTheme.typography.titleSmall)
             Text(
-                "每条脚本一个名字 + 多行命令。连接前在主机卡片里挑一条运行。",
+                "每条 = 名称 + 工作目录 + 命令。连接时 shell 会先 cd 到工作目录，文件浏览器也以此为根。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
@@ -545,9 +498,19 @@ private fun ScriptEditor(
             }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
+                value = script.workingDir,
+                onValueChange = { onChange(script.copy(workingDir = it)) },
+                label = { Text("工作目录（可选）") },
+                placeholder = { Text("~/work 或 /opt/app；空 = home") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
                 value = script.content,
                 onValueChange = { onChange(script.copy(content = it)) },
-                placeholder = { Text("# 一行一条命令\ncd ~/work\nsource venv/bin/activate") },
+                label = { Text("命令") },
+                placeholder = { Text("# 一行一条\nsource venv/bin/activate\nnpm run dev") },
                 modifier = Modifier.fillMaxWidth().height(120.dp),
             )
         }

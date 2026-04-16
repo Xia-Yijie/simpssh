@@ -66,7 +66,7 @@ private data class TreeRow(val entry: DirEntry, val depth: Int)
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun FilesBody(tab: TabState.Files, manager: SessionManager) {
+fun FilesBody(tab: TabState, manager: SessionManager) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -88,7 +88,7 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
             withContext(Dispatchers.IO) {
                 runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } }
             }
-            withContext(Dispatchers.Main) { tab.status = "已下载 ${target.name} (${bytes.size} B)" }
+            withContext(Dispatchers.Main) { tab.filesStatus = "已下载 ${target.name} (${bytes.size} B)" }
         }
     }
 
@@ -107,7 +107,7 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
             val dest = joinPath(destDir, name)
             val err = manager.writeFileBytes(tab, dest, bytes)
             withContext(Dispatchers.Main) {
-                tab.status = if (err == null) "已上传 → $dest" else "上传失败: ${err.message}"
+                tab.filesStatus = if (err == null) "已上传 → $dest" else "上传失败: ${err.message}"
             }
             manager.loadChildren(tab, destDir)
         }
@@ -154,7 +154,7 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
         // Status
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
             Text(
-                tab.status,
+                tab.filesStatus,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
@@ -200,7 +200,7 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
                         scope.launch {
                             val err = manager.delete(tab, row.entry)
                             if (err == null) manager.loadChildren(tab, parentOf(row.entry.path))
-                            else withContext(Dispatchers.Main) { tab.status = "删除失败: ${err.message}" }
+                            else withContext(Dispatchers.Main) { tab.filesStatus = "删除失败: ${err.message}" }
                         }
                     },
                 )
@@ -241,7 +241,7 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
                 scope.launch {
                     val err = manager.mkdir(tab, joinPath(parent, name))
                     if (err == null) manager.loadChildren(tab, parent)
-                    else withContext(Dispatchers.Main) { tab.status = "创建失败: ${err.message}" }
+                    else withContext(Dispatchers.Main) { tab.filesStatus = "创建失败: ${err.message}" }
                 }
             },
         )
@@ -263,7 +263,7 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
                 scope.launch {
                     val err = manager.rename(tab, entry.path, to)
                     if (err == null) manager.loadChildren(tab, parent)
-                    else withContext(Dispatchers.Main) { tab.status = "重命名失败: ${err.message}" }
+                    else withContext(Dispatchers.Main) { tab.filesStatus = "重命名失败: ${err.message}" }
                 }
             },
         )
@@ -408,7 +408,7 @@ private fun TextInputDialog(
     )
 }
 
-private fun flattenTree(tab: TabState.Files, path: String, depth: Int): List<TreeRow> {
+private fun flattenTree(tab: TabState, path: String, depth: Int): List<TreeRow> {
     val children = tab.childrenByPath[path] ?: return emptyList()
     val out = mutableListOf<TreeRow>()
     for (c in children) {

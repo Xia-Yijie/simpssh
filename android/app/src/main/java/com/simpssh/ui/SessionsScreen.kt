@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,7 +18,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -94,19 +98,63 @@ fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            when (val a = active) {
-                is TabState.Shell -> ShellBody(a, onSend = { line ->
-                    manager.send(a.id, line.toByteArray())
+            if (active != null) {
+                SessionBody(active, manager)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SessionBody(tab: TabState, manager: SessionManager) {
+    // Lazy SFTP connect on first switch to Files.
+    LaunchedEffect(tab.view) {
+        if (tab.view == TabState.View.Files) manager.ensureFilesConnected(tab)
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // View switcher
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            SingleChoiceSegmentedButtonRow {
+                SegmentedButton(
+                    selected = tab.view == TabState.View.Terminal,
+                    onClick = { tab.view = TabState.View.Terminal },
+                    shape = SegmentedButtonDefaults.itemShape(0, 2),
+                    icon = { Icon(Icons.Default.Terminal, null, modifier = Modifier.size(16.dp)) },
+                ) {
+                    Text("Terminal")
+                }
+                SegmentedButton(
+                    selected = tab.view == TabState.View.Files,
+                    onClick = { tab.view = TabState.View.Files },
+                    shape = SegmentedButtonDefaults.itemShape(1, 2),
+                    icon = { Icon(Icons.Default.Folder, null, modifier = Modifier.size(16.dp)) },
+                ) {
+                    Text("Files")
+                }
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (tab.view) {
+                TabState.View.Terminal -> ShellBody(tab, onSend = { line ->
+                    manager.send(tab.id, line.toByteArray())
                 })
-                is TabState.Files -> FilesBody(a, manager)
-                null -> {}
+                TabState.View.Files -> FilesBody(tab, manager)
             }
         }
     }
 }
 
 @Composable
-private fun ShellBody(tab: TabState.Shell, onSend: (String) -> Unit) {
+private fun ShellBody(tab: TabState, onSend: (String) -> Unit) {
     val listState = rememberLazyListState()
     LaunchedEffect(tab.rows.size) {
         if (tab.rows.isNotEmpty()) {
@@ -125,7 +173,7 @@ private fun ShellBody(tab: TabState.Shell, onSend: (String) -> Unit) {
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
         ) {
             Text(
-                tab.status,
+                tab.shellStatus,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                 modifier = Modifier.padding(8.dp),
