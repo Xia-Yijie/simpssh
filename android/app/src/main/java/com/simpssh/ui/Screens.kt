@@ -28,9 +28,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -93,33 +93,32 @@ fun ServerListScreen(
             )
         },
         floatingActionButton = {
-            // IntrinsicSize.Max + fillMaxWidth on each child: all 3 FABs end
-            // up the width of the widest (添加服务器), so 操作指南 / 设置
-            // line up under it instead of being narrower chips.
+            // IntrinsicSize.Max sizes the column to its widest child
+            // (添加服务器). All three FABs use start-aligned content + the
+            // shorter ones fillMaxWidth, so icons line up at the same X
+            // and the column doesn't stretch beyond what 添加服务器 needs.
             Column(
                 modifier = Modifier.width(IntrinsicSize.Max),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ExtendedFloatingActionButton(
+                AlignedFab(
+                    glyph = NerdGlyphs.PLUS,
+                    label = "添加服务器",
                     onClick = onAdd,
-                    icon = { NerdIcon(NerdGlyphs.PLUS, null, size = 18.dp) },
-                    text = { Text("添加服务器") },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
-                ExtendedFloatingActionButton(
+                AlignedFab(
+                    glyph = NerdGlyphs.HELP,
+                    label = "操作指南",
                     onClick = { showGuide = true },
-                    icon = { NerdIcon(NerdGlyphs.HELP, null, size = 18.dp) },
-                    text = { Text("操作指南") },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                ExtendedFloatingActionButton(
+                AlignedFab(
+                    glyph = NerdGlyphs.COG,
+                    label = "设置",
                     onClick = onShowSettings,
-                    icon = { NerdIcon(NerdGlyphs.COG, null, size = 18.dp) },
-                    text = { Text("设置") },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -151,6 +150,36 @@ fun ServerListScreen(
     }
 
     if (showGuide) GuideDialog(onDismiss = { showGuide = false })
+}
+
+/// FAB with start-aligned (icon, label) content so multiple FABs stacked
+/// vertically share the same icon X column. Width is whatever the parent
+/// gives (e.g. fillMaxWidth inside an IntrinsicSize.Max column to match
+/// the widest sibling); otherwise it sizes to its content.
+@Composable
+private fun AlignedFab(
+    glyph: String,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    containerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceVariant,
+    contentColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    FloatingActionButton(
+        onClick = onClick,
+        containerColor = containerColor,
+        contentColor = contentColor,
+        modifier = modifier.height(56.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NerdIcon(glyph, null, size = 18.dp, tint = contentColor)
+            Spacer(Modifier.width(12.dp))
+            Text(label, style = MaterialTheme.typography.titleSmall)
+        }
+    }
 }
 
 @Composable
