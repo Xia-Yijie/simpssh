@@ -43,7 +43,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -186,6 +185,11 @@ private fun ThemeRow(
     }
 }
 
+// macOS-style window control colours (close / minimize / maximize).
+private val MacControlClose    = Color(0xFFFF5F56)
+private val MacControlMinimize = Color(0xFFFFBD2E)
+private val MacControlMaximize = Color(0xFF27C93F)
+
 /// Mini terminal mock-up so users can see what a palette actually feels
 /// like — themed window chrome (3 dots), prompt in primary colour, command
 /// echo in default fg, output in dim fg, all on the dark background.
@@ -193,13 +197,17 @@ private fun ThemeRow(
 private fun TerminalPreview(palette: ThemePalette) {
     val fg = bestForeground(palette.darkBackground)
     val dimFg = fg.copy(alpha = 0.65f)
+    val termStyle = TerminalTextStyle
+    val promptStyle = termStyle.copy(color = palette.primary, fontWeight = FontWeight.Bold)
+    val cmdStyle = termStyle.copy(color = fg)
+    val dimStyle = termStyle.copy(color = dimFg)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
             .background(palette.darkBackground),
     ) {
-        // Title bar with three dots
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -207,37 +215,24 @@ private fun TerminalPreview(palette: ThemePalette) {
                 .padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Dot(Color(0xFFFF5F56))
+            Dot(MacControlClose)
             Spacer(Modifier.width(4.dp))
-            Dot(Color(0xFFFFBD2E))
+            Dot(MacControlMinimize)
             Spacer(Modifier.width(4.dp))
-            Dot(Color(0xFF27C93F))
+            Dot(MacControlMaximize)
         }
         Column(modifier = Modifier.padding(10.dp)) {
             Row {
-                Text("$", color = palette.primary, fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("$", style = promptStyle)
                 Spacer(Modifier.width(6.dp))
-                Text("ls -la", color = fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                Text("ls -la", style = cmdStyle)
             }
-            Text(
-                "drwxr-xr-x  src/",
-                color = dimFg, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-            )
-            Text(
-                "-rw-r--r--  README.md",
-                color = dimFg, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-            )
+            Text("drwxr-xr-x  src/", style = dimStyle)
+            Text("-rw-r--r--  README.md", style = dimStyle)
             Row {
-                Text("$", color = palette.primary, fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("$", style = promptStyle)
                 Spacer(Modifier.width(6.dp))
-                // Tail block-cursor
-                Box(
-                    modifier = Modifier
-                        .size(width = 7.dp, height = 14.dp)
-                        .background(fg),
-                )
+                Box(modifier = Modifier.size(width = 7.dp, height = 14.dp).background(fg))
             }
         }
     }
@@ -300,12 +295,12 @@ fun CustomPaletteEditScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            ColorField("主色 (primary)", primaryHex) { primaryHex = it }
-            ColorField("容器色 (container)", containerHex) { containerHex = it }
-            ColorField("暗背景 (dark background)", bgHex) { bgHex = it }
+            ColorField("主色", primaryHex) { primaryHex = it }
+            ColorField("容器色", containerHex) { containerHex = it }
+            ColorField("终端背景", bgHex) { bgHex = it }
 
             Text(
-                "其余颜色（onPrimary、surface 等）会按对比度和明度自动派生。",
+                "其余颜色会按对比度和明度自动派生。背景色较亮时整页会自动切到浅色界面。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
@@ -346,7 +341,7 @@ fun CustomPaletteEditScreen(
                                 .padding(10.dp),
                         ) {
                             Text(
-                                "Container 色",
+                                "容器色",
                                 color = bestForeground(container),
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -394,7 +389,7 @@ private fun ColorField(label: String, hex: String, onChange: (String) -> Unit) {
             value = hex,
             onValueChange = { onChange(it.removePrefix("#").uppercase().take(6)) },
             label = { Text(label) },
-            placeholder = { Text("RRGGBB") },
+            placeholder = { Text("六位十六进制，如 7AA2F7") },
             singleLine = true,
             isError = parsed == null && hex.isNotEmpty(),
             modifier = Modifier.weight(1f),

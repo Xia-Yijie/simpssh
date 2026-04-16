@@ -82,6 +82,28 @@ val BuiltInPalettes: List<ThemePalette> = listOf(
         darkBackground = Color(0xFF002B36), darkSurface = Color(0xFF073642),
         darkSurfaceVariant = Color(0xFF586E75),
     ),
+    // ---- Light variants — used when palette.darkBackground is actually light. ----
+    ThemePalette(
+        name = "morninglight", displayName = "晨曦白",
+        primary = Color(0xFF0969DA), onPrimary = Color.White,
+        primaryContainer = Color(0xFFDDF4FF), onPrimaryContainer = Color(0xFF0A3069),
+        darkBackground = Color(0xFFFAFBFC), darkSurface = Color(0xFFF6F8FA),
+        darkSurfaceVariant = Color(0xFFEAEEF2),
+    ),
+    ThemePalette(
+        name = "warmcream", displayName = "米色暖光",
+        primary = Color(0xFF859900), onPrimary = Color(0xFFFDF6E3),
+        primaryContainer = Color(0xFFEEE8D5), onPrimaryContainer = Color(0xFF586E75),
+        darkBackground = Color(0xFFFDF6E3), darkSurface = Color(0xFFF7F0D8),
+        darkSurfaceVariant = Color(0xFFEEE8D5),
+    ),
+    ThemePalette(
+        name = "lightmist", displayName = "轻雾灰",
+        primary = Color(0xFF5C6BC0), onPrimary = Color.White,
+        primaryContainer = Color(0xFFE8EAF6), onPrimaryContainer = Color(0xFF1A237E),
+        darkBackground = Color(0xFFF5F5F7), darkSurface = Color(0xFFEBEDF0),
+        darkSurfaceVariant = Color(0xFFDFE2E8),
+    ),
 )
 
 /// Resolve a palette by name across both built-in and custom lists,
@@ -112,6 +134,30 @@ internal fun darkSchemeFor(p: ThemePalette): ColorScheme = darkColorScheme(
     onSurfaceVariant = Color(0xFFB7BEC9),
     outline = Color(0xFF40474F),
 )
+
+/// True when the palette's terminal background is actually a light colour
+/// (e.g. the "晨曦白" / "米色暖光" / "轻雾灰" presets). The session view picks
+/// a light Material scheme in that case so text + chrome stay readable.
+val ThemePalette.isLight: Boolean
+    get() = darkBackground.luminance() > 0.5f
+
+/// The Material scheme to use for the always-themed Session view. Picks a
+/// light scheme + the palette's bg as surface for light palettes; otherwise
+/// the dark scheme.
+internal fun sessionSchemeFor(p: ThemePalette): ColorScheme =
+    if (p.isLight) {
+        lightColorScheme(
+            primary = p.primary,
+            onPrimary = p.onPrimary,
+            primaryContainer = p.primaryContainer,
+            onPrimaryContainer = p.onPrimaryContainer,
+            background = p.darkBackground,
+            surface = p.darkSurface,
+            surfaceVariant = p.darkSurfaceVariant,
+        )
+    } else {
+        darkSchemeFor(p)
+    }
 
 @Composable
 fun SimpsshTheme(

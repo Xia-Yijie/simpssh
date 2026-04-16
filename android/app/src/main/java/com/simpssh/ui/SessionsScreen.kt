@@ -81,9 +81,10 @@ fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
         if (manager.tabs.isEmpty()) onHome()
     }
 
-    // Dark variant of the user-selected palette so the session view matches
-    // the home screen primary colour.
-    MaterialTheme(colorScheme = darkSchemeFor(LocalPalette.current)) {
+    // Light or dark Material variant chosen automatically based on the
+    // palette's background luminance, so the session view matches the home
+    // screen primary colour and adapts to light palettes too.
+    MaterialTheme(colorScheme = sessionSchemeFor(LocalPalette.current)) {
     Scaffold(
         topBar = {
             Column {
@@ -208,12 +209,15 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                 modifier = Modifier.padding(8.dp),
             )
         }
+        val palette = LocalPalette.current
+        val termBg = palette.darkBackground
+        val termFg = bestForeground(termBg)
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth().weight(1f)
-                .background(TerminalBackground),
+                .background(termBg),
         ) {
-            val termStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            val termStyle = TerminalTextStyle
             val measurer = rememberTextMeasurer()
             val sample = remember(termStyle) { measurer.measure(AnnotatedString("M"), termStyle) }
             val padPx = with(LocalDensity.current) { 12.dp.toPx() }
@@ -230,8 +234,10 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                 modifier = Modifier.fillMaxSize().padding(12.dp),
             ) {
                 itemsIndexed(tab.rows) { i, row ->
-                    val ann = row.toAnnotatedString()
-                    val withCursor = if (i == tab.cursorRow) addCursorBlock(ann, tab.cursorCol) else ann
+                    val ann = row.toAnnotatedString(themeFg = termFg, themeBg = termBg)
+                    val withCursor = if (i == tab.cursorRow)
+                        addCursorBlock(ann, tab.cursorCol, fg = termBg, bg = termFg)
+                    else ann
                     Text(withCursor, style = termStyle)
                 }
             }
@@ -297,32 +303,39 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
 
 // Default terminal background — matches the DEFAULT_BG in Rust so cells with
 // no explicit background blend with the surrounding container.
-private val TerminalBackground = Color(0xFF000000)
+internal val TerminalBackground = Color(0xFF000000)
 
-private val CursorBg = Color(0xFFD3D7CF.toInt())   // matches default fg → block cursor
-private val CursorFg = Color(0xFF000000.toInt())   // black char on light block
+/// Shared text style for any monospace terminal-like rendering (the real
+/// shell view, the file-preview dialog, and the per-theme preview). Keep
+/// these in sync so the preview really looks like the terminal.
+internal val TerminalTextStyle: TextStyle =
+    TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
 
-private fun addCursorBlock(s: AnnotatedString, col: Int): AnnotatedString {
+// Rust DEFAULT_FG / DEFAULT_BG (from terminal.rs). Cells whose fg/bg equal
+// these are treated as "use the theme colour" instead of the literal value.
+private const val RUST_DEFAULT_FG = 0xD3D7CF
+private const val RUST_DEFAULT_BG = 0x000000
+
+private fun addCursorBlock(s: AnnotatedString, col: Int, fg: Color, bg: Color): AnnotatedString {
     if (col < 0) return s
-    // Pad with spaces if the cursor is past the end of the row text.
     val padded = if (col >= s.length) {
         AnnotatedString.Builder(s).apply { append(" ".repeat(col - s.length + 1)) }.toAnnotatedString()
     } else s
     val b = AnnotatedString.Builder(padded)
-    b.addStyle(
-        SpanStyle(background = CursorBg, color = CursorFg),
-        col,
-        col + 1,
-    )
+    b.addStyle(SpanStyle(background = bg, color = fg), col, col + 1)
     return b.toAnnotatedString()
 }
 
-private fun StyledRow.toAnnotatedString(): AnnotatedString {
+private fun StyledRow.toAnnotatedString(themeFg: Color, themeBg: Color): AnnotatedString {
     val b = AnnotatedString.Builder()
     b.append(text)
     spans.forEach { sp ->
-        val fg = Color(0xFF000000.toInt() or sp.fg.toInt())
-        val bg = Color(0xFF000000.toInt() or sp.bg.toInt())
+        val fgInt = sp.fg.toInt() and 0xFFFFFF
+        val bgInt = sp.bg.toInt() and 0xFFFFFF
+        val fg = if (fgInt == RUST_DEFAULT_FG) themeFg
+                 else Color(0xFF000000.toInt() or fgInt)
+        val bg = if (bgInt == RUST_DEFAULT_BG) themeBg
+                 else Color(0xFF000000.toInt() or bgInt)
         val flags = sp.flags.toInt()
         b.addStyle(
             SpanStyle(

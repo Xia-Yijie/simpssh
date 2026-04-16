@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -214,13 +213,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
             title = { Text(path.substringAfterLast('/'), maxLines = 1) },
             text = {
                 Box(modifier = Modifier.height(360.dp).verticalScroll(rememberScrollState())) {
-                    Text(
-                        body,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                        ),
-                    )
+                    Text(body, style = TerminalTextStyle)
                 }
             },
         )

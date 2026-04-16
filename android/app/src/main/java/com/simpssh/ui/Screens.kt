@@ -102,7 +102,8 @@ fun ServerListScreen(
                     glyph = NerdGlyphs.PLUS,
                     label = "添加服务器",
                     onClick = onAdd,
-                    primary = true,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 AlignedFab(
                     glyph = NerdGlyphs.HELP,
@@ -145,32 +146,28 @@ fun ServerListScreen(
     if (showGuide) GuideDialog(onDismiss = { showGuide = false })
 }
 
-/// FAB whose [Icon][Label] content is forced to start-align inside a fixed
-/// 200dp width, so multiple FABs stacked together have their icons in
-/// the same X column regardless of label length.
+/// FAB with a fixed-min 200dp width and start-aligned (icon, label) so
+/// multiple FABs stacked together share the same icon X column regardless
+/// of label length. Long labels are allowed to grow the FAB wider.
 @Composable
 private fun AlignedFab(
     glyph: String,
     label: String,
     onClick: () -> Unit,
-    primary: Boolean = false,
+    containerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceVariant,
+    contentColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
-    val container = if (primary) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceVariant
-    val content = if (primary) MaterialTheme.colorScheme.onPrimaryContainer
-    else MaterialTheme.colorScheme.onSurfaceVariant
-
     FloatingActionButton(
         onClick = onClick,
-        containerColor = container,
-        contentColor = content,
-        modifier = Modifier.width(200.dp).height(56.dp),
+        containerColor = containerColor,
+        contentColor = contentColor,
+        modifier = Modifier.widthIn(min = 200.dp).height(56.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NerdIcon(glyph, null, size = 20.dp, tint = content)
+            NerdIcon(glyph, null, size = 20.dp, tint = contentColor)
             Spacer(Modifier.width(12.dp))
             Text(label, style = MaterialTheme.typography.titleSmall)
         }
