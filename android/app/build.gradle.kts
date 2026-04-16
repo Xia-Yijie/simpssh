@@ -40,6 +40,15 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // Output `simpssh-<version>-<buildType>.apk` instead of the default
+    // `app-<buildType>.apk` so shared APKs are self-describing.
+    applicationVariants.all {
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
+                .outputFileName = "simpssh-${versionName}-${name}.apk"
+        }
+    }
 }
 
 dependencies {
