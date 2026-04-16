@@ -4,7 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import com.simpssh.data.InitScript
 import com.simpssh.data.Server
 import kotlinx.coroutines.CoroutineScope
@@ -50,8 +52,13 @@ sealed class TabState {
     ) : TabState() {
         override var status by mutableStateOf("连接中…")
         var sftp: SftpSession? = null
-        var cwd by mutableStateOf("/")
-        val entries: SnapshotStateList<DirEntry> = mutableStateListOf()
+        /// Top of the tree the user sees. Children of this path are rendered
+        /// at depth 0; the root itself is not shown as a row.
+        var rootPath by mutableStateOf("/")
+        /// dirPath -> its entries, cached after first listDir.
+        val childrenByPath: SnapshotStateMap<String, List<DirEntry>> = mutableStateMapOf()
+        /// Currently expanded folders.
+        val expanded: SnapshotStateList<String> = mutableStateListOf()
 
         override val title: String
             get() = server.name.ifBlank { server.host } + " · 文件"
@@ -140,30 +147,41 @@ class SessionManager(private val scope: CoroutineScope) {
             val home = runCatching { s.homeDir() }.getOrNull() ?: "/"
             withContext(Dispatchers.Main) {
                 tab.status = "已连接"
-                tab.cwd = home
+                tab.rootPath = home
             }
-            refreshFiles(tab)
+            loadChildren(tab, home)
         } catch (e: Exception) {
             withContext(Dispatchers.Main) { tab.status = "连接失败: ${e.message}" }
         }
     }
 
-    suspend fun refreshFiles(tab: TabState.Files) {
+    /// Lists a directory and caches the result. No-op if the session is dead.
+    suspend fun loadChildren(tab: TabState.Files, path: String) {
         val s = tab.sftp ?: return
         try {
-            val list = withContext(Dispatchers.IO) { s.listDir(tab.cwd) }
-            withContext(Dispatchers.Main) {
-                tab.entries.clear()
-                tab.entries.addAll(list)
-            }
+            val list = withContext(Dispatchers.IO) { s.listDir(path) }
+            withContext(Dispatchers.Main) { tab.childrenByPath[path] = list }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) { tab.status = "读取失败: ${e.message}" }
         }
     }
 
-    suspend fun navigateTo(tab: TabState.Files, path: String) {
-        withContext(Dispatchers.Main) { tab.cwd = path }
-        refreshFiles(tab)
+    suspend fun toggleExpand(tab: TabState.Files, path: String) {
+        if (tab.expanded.contains(path)) {
+            withContext(Dispatchers.Main) { tab.expanded.remove(path) }
+        } else {
+            if (!tab.childrenByPath.containsKey(path)) loadChildren(tab, path)
+            withContext(Dispatchers.Main) { tab.expanded.add(path) }
+        }
+    }
+
+    suspend fun setRoot(tab: TabState.Files, path: String) {
+        withContext(Dispatchers.Main) {
+            tab.rootPath = path
+            tab.expanded.clear()
+            tab.childrenByPath.clear()
+        }
+        loadChildren(tab, path)
     }
 
     suspend fun readFileBytes(tab: TabState.Files, path: String, max: Int = 256 * 1024): ByteArray? {

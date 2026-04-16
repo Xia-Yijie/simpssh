@@ -1,14 +1,10 @@
 package com.simpssh.ui
 
-import android.app.Activity
-import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,17 +23,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,7 +46,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,7 +55,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -66,16 +62,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.simpssh_core.DirEntry
 
+private data class TreeRow(val entry: DirEntry, val depth: Int)
+
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FilesBody(tab: TabState.Files, manager: SessionManager) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var preview by remember { mutableStateOf<Pair<String, String>?>(null) } // path, body
+    var preview by remember { mutableStateOf<Pair<String, String>?>(null) }
     var renameTarget by remember { mutableStateOf<DirEntry?>(null) }
-    var mkdirOpen by remember { mutableStateOf(false) }
+    var mkdirInDir by remember { mutableStateOf<String?>(null) }
     var pendingDownload by remember { mutableStateOf<DirEntry?>(null) }
+    var pendingUploadDir by remember { mutableStateOf<String?>(null) }
+    var gotoOpen by remember { mutableStateOf(false) }
 
     val downloadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -84,22 +84,19 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
         pendingDownload = null
         if (uri == null || target == null) return@rememberLauncherForActivityResult
         scope.launch {
-            val bytes = manager.readFileBytes(tab, target.path, max = 16 * 1024 * 1024)
-                ?: return@launch
+            val bytes = manager.readFileBytes(tab, target.path, max = 16 * 1024 * 1024) ?: return@launch
             withContext(Dispatchers.IO) {
-                runCatching {
-                    ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                }
+                runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } }
             }
-            withContext(Dispatchers.Main) {
-                tab.status = "已下载 ${target.name} (${bytes.size} B)"
-            }
+            withContext(Dispatchers.Main) { tab.status = "已下载 ${target.name} (${bytes.size} B)" }
         }
     }
 
     val uploadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
+        val destDir = pendingUploadDir ?: tab.rootPath
+        pendingUploadDir = null
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             val bytes = withContext(Dispatchers.IO) {
@@ -107,94 +104,102 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
                     .getOrNull()
             } ?: return@launch
             val name = queryDisplayName(ctx, uri) ?: "uploaded.bin"
-            val dest = joinPath(tab.cwd, name)
+            val dest = joinPath(destDir, name)
             val err = manager.writeFileBytes(tab, dest, bytes)
             withContext(Dispatchers.Main) {
-                tab.status = if (err == null) "已上传 $name (${bytes.size} B)" else "上传失败: ${err.message}"
+                tab.status = if (err == null) "已上传 → $dest" else "上传失败: ${err.message}"
             }
-            manager.refreshFiles(tab)
+            manager.loadChildren(tab, destDir)
         }
     }
 
+    // Recompute the visible tree whenever expansion or any cached dir changes.
+    val rows = remember(
+        tab.rootPath,
+        tab.expanded.toList(),
+        tab.childrenByPath.toMap(),
+    ) { flattenTree(tab, tab.rootPath, depth = 0) }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Path bar + actions
+        // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                .padding(8.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Breadcrumbs(tab.cwd) { newPath ->
-                    scope.launch { manager.navigateTo(tab, newPath) }
-                }
-            }
-            IconButton(onClick = { scope.launch { manager.refreshFiles(tab) } }) {
-                Icon(Icons.Default.Refresh, "刷新")
-            }
-            IconButton(onClick = { mkdirOpen = true }) {
-                Icon(Icons.Default.CreateNewFolder, "新建目录")
+            Icon(
+                Icons.Default.Folder, null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                tab.rootPath,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                maxLines = 1,
+            )
+            IconButton(onClick = { gotoOpen = true }) {
+                Icon(Icons.Default.Home, "切换根路径")
             }
             IconButton(onClick = {
-                uploadLauncher.launch(arrayOf("*/*"))
+                scope.launch { manager.loadChildren(tab, tab.rootPath) }
             }) {
-                Icon(Icons.Default.Upload, "上传")
+                Icon(Icons.Default.Refresh, "刷新")
             }
         }
+
         // Status
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
             Text(
                 tab.status,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
         }
-        // Listing
+
+        // Tree
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
-            // Up dir
-            if (tab.cwd != "/") {
-                item {
-                    EntryRow(
-                        leading = { Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary) },
-                        name = "..",
-                        meta = "上级目录",
-                        onClick = { scope.launch { manager.navigateTo(tab, parentOf(tab.cwd)) } },
-                        trailing = {},
-                    )
-                }
-            }
-            items(tab.entries, key = { it.path }) { entry ->
-                EntryItem(
-                    entry = entry,
-                    onOpen = {
-                        if (entry.isDir) {
-                            scope.launch { manager.navigateTo(tab, entry.path) }
+            items(rows, key = { "${it.depth}@${it.entry.path}" }) { row ->
+                TreeRowView(
+                    entry = row.entry,
+                    depth = row.depth,
+                    isExpanded = tab.expanded.contains(row.entry.path),
+                    onClick = {
+                        if (row.entry.isDir) {
+                            scope.launch { manager.toggleExpand(tab, row.entry.path) }
                         } else {
                             scope.launch {
-                                val bytes = manager.readFileBytes(tab, entry.path) ?: return@launch
-                                val text = decodeText(bytes)
-                                preview = entry.path to text
+                                val bytes = manager.readFileBytes(tab, row.entry.path) ?: return@launch
+                                preview = row.entry.path to decodeText(bytes)
                             }
                         }
                     },
-                    onDownload = {
-                        pendingDownload = entry
-                        downloadLauncher.launch(entry.name)
-                    },
-                    onRename = { renameTarget = entry },
+                    onDownload = if (!row.entry.isDir) {
+                        {
+                            pendingDownload = row.entry
+                            downloadLauncher.launch(row.entry.name)
+                        }
+                    } else null,
+                    onMkdirHere = if (row.entry.isDir) {
+                        { mkdirInDir = row.entry.path }
+                    } else null,
+                    onUploadHere = if (row.entry.isDir) {
+                        {
+                            pendingUploadDir = row.entry.path
+                            uploadLauncher.launch(arrayOf("*/*"))
+                        }
+                    } else null,
+                    onRename = { renameTarget = row.entry },
                     onDelete = {
                         scope.launch {
-                            val err = manager.delete(tab, entry)
-                            if (err == null) manager.refreshFiles(tab)
+                            val err = manager.delete(tab, row.entry)
+                            if (err == null) manager.loadChildren(tab, parentOf(row.entry.path))
                             else withContext(Dispatchers.Main) { tab.status = "删除失败: ${err.message}" }
                         }
                     },
@@ -203,6 +208,7 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
         }
     }
 
+    // Preview
     preview?.let { (path, body) ->
         AlertDialog(
             onDismissRequest = { preview = null },
@@ -222,24 +228,26 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
         )
     }
 
-    if (mkdirOpen) {
+    // mkdir
+    mkdirInDir?.let { parent ->
         TextInputDialog(
-            title = "新建目录",
+            title = "在 ${parent.substringAfterLast('/').ifBlank { "/" }} 中新建目录",
             label = "名称",
             confirm = "创建",
-            onCancel = { mkdirOpen = false },
+            onCancel = { mkdirInDir = null },
             onConfirm = { name ->
-                mkdirOpen = false
+                mkdirInDir = null
                 if (name.isBlank()) return@TextInputDialog
                 scope.launch {
-                    val err = manager.mkdir(tab, joinPath(tab.cwd, name))
-                    if (err == null) manager.refreshFiles(tab)
+                    val err = manager.mkdir(tab, joinPath(parent, name))
+                    if (err == null) manager.loadChildren(tab, parent)
                     else withContext(Dispatchers.Main) { tab.status = "创建失败: ${err.message}" }
                 }
             },
         )
     }
 
+    // rename
     renameTarget?.let { entry ->
         TextInputDialog(
             title = "重命名",
@@ -254,124 +262,122 @@ fun FilesBody(tab: TabState.Files, manager: SessionManager) {
                 val to = joinPath(parent, newName)
                 scope.launch {
                     val err = manager.rename(tab, entry.path, to)
-                    if (err == null) manager.refreshFiles(tab)
+                    if (err == null) manager.loadChildren(tab, parent)
                     else withContext(Dispatchers.Main) { tab.status = "重命名失败: ${err.message}" }
                 }
             },
         )
     }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun Breadcrumbs(cwd: String, onJump: (String) -> Unit) {
-    val parts = remember(cwd) {
-        if (cwd == "/") listOf("/")
-        else listOf("/") + cwd.trim('/').split('/')
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        parts.forEachIndexed { i, p ->
-            val display = if (p == "/") "/" else p
-            val target = if (i == 0) "/" else "/" + parts.subList(1, i + 1).joinToString("/")
-            AssistChip(
-                onClick = { if (target != cwd) onJump(target) },
-                label = { Text(display, maxLines = 1) },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = if (target == cwd)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surface,
-                ),
-                modifier = Modifier.padding(end = 4.dp),
-            )
-        }
+    // change root
+    if (gotoOpen) {
+        TextInputDialog(
+            title = "切换根目录",
+            label = "绝对路径",
+            initial = tab.rootPath,
+            confirm = "前往",
+            onCancel = { gotoOpen = false },
+            onConfirm = { p ->
+                gotoOpen = false
+                if (p.isBlank()) return@TextInputDialog
+                scope.launch { manager.setRoot(tab, p) }
+            },
+        )
     }
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun EntryItem(
+private fun TreeRowView(
     entry: DirEntry,
-    onOpen: () -> Unit,
-    onDownload: () -> Unit,
+    depth: Int,
+    isExpanded: Boolean,
+    onClick: () -> Unit,
+    onDownload: (() -> Unit)?,
+    onMkdirHere: (() -> Unit)?,
+    onUploadHere: (() -> Unit)?,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val sizeStr = if (entry.isDir) "目录" else humanSize(entry.size.toLong())
-
-    EntryRow(
-        leading = {
-            Icon(
-                if (entry.isDir) Icons.Default.Folder
-                else Icons.AutoMirrored.Filled.InsertDriveFile,
-                null,
-                tint = if (entry.isDir) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            )
-        },
-        name = entry.name,
-        meta = sizeStr,
-        onClick = onOpen,
-        onLongPress = { menu = true },
-        trailing = {
-            Box {
-                IconButton(onClick = { menu = true }) {
-                    Icon(Icons.Default.MoreVert, "更多")
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    if (!entry.isDir) {
-                        DropdownMenuItem(
-                            text = { Text("下载到本机") },
-                            onClick = { menu = false; onDownload() },
-                            leadingIcon = { Icon(Icons.Default.Download, null) },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("重命名") },
-                        onClick = { menu = false; onRename() },
-                        leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("删除") },
-                        onClick = { menu = false; onDelete() },
-                        leadingIcon = {
-                            Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
-                        },
-                    )
-                }
-            }
-        },
-    )
-}
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun EntryRow(
-    leading: @Composable () -> Unit,
-    name: String,
-    meta: String,
-    onClick: () -> Unit,
-    onLongPress: () -> Unit = onClick,
-    trailing: @Composable () -> Unit,
-) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
-            .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+            .padding(start = (8 + depth * 16).dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(modifier = Modifier.size(28.dp), contentAlignment = Alignment.Center) { leading() }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-            Text(
-                meta,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
+        // Chevron column (only for dirs; files get matching width to align)
+        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+            if (entry.isDir) {
+                Icon(
+                    if (isExpanded) Icons.Default.ExpandMore
+                    else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
         }
-        trailing()
+        // File / folder icon
+        Icon(
+            when {
+                entry.isDir && isExpanded -> Icons.Default.FolderOpen
+                entry.isDir -> Icons.Default.Folder
+                else -> Icons.AutoMirrored.Filled.InsertDriveFile
+            },
+            null,
+            modifier = Modifier.size(18.dp),
+            tint = if (entry.isDir) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            entry.name,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+        )
+        Box {
+            IconButton(onClick = { menu = true }, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.MoreVert, "更多", modifier = Modifier.size(16.dp))
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                onMkdirHere?.let {
+                    DropdownMenuItem(
+                        text = { Text("在此处新建目录") },
+                        onClick = { menu = false; it() },
+                        leadingIcon = { Icon(Icons.Default.NoteAdd, null) },
+                    )
+                }
+                onUploadHere?.let {
+                    DropdownMenuItem(
+                        text = { Text("上传文件到此处") },
+                        onClick = { menu = false; it() },
+                        leadingIcon = { Icon(Icons.Default.Upload, null) },
+                    )
+                }
+                onDownload?.let {
+                    DropdownMenuItem(
+                        text = { Text("下载到本机") },
+                        onClick = { menu = false; it() },
+                        leadingIcon = { Icon(Icons.Default.Download, null) },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("重命名") },
+                    onClick = { menu = false; onRename() },
+                    leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null) },
+                )
+                DropdownMenuItem(
+                    text = { Text("删除") },
+                    onClick = { menu = false; onDelete() },
+                    leadingIcon = {
+                        Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -402,6 +408,18 @@ private fun TextInputDialog(
     )
 }
 
+private fun flattenTree(tab: TabState.Files, path: String, depth: Int): List<TreeRow> {
+    val children = tab.childrenByPath[path] ?: return emptyList()
+    val out = mutableListOf<TreeRow>()
+    for (c in children) {
+        out.add(TreeRow(c, depth))
+        if (c.isDir && tab.expanded.contains(c.path)) {
+            out.addAll(flattenTree(tab, c.path, depth + 1))
+        }
+    }
+    return out
+}
+
 private fun parentOf(p: String): String {
     if (p == "/") return "/"
     val trimmed = p.trimEnd('/')
@@ -412,17 +430,9 @@ private fun parentOf(p: String): String {
 private fun joinPath(base: String, name: String): String =
     if (base.endsWith('/')) "$base$name" else "$base/$name"
 
-private fun humanSize(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
-    bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
-    else -> "%.2f GB".format(bytes / (1024.0 * 1024 * 1024))
-}
-
 private fun decodeText(bytes: ByteArray): String {
     return try {
         val s = bytes.toString(Charsets.UTF_8)
-        // Heuristic: if too many replacement chars, treat as binary.
         val bad = s.count { it == '\uFFFD' }
         if (bad > s.length / 50) "（二进制文件，长度 ${bytes.size} 字节）" else s
     } catch (_: Exception) {
