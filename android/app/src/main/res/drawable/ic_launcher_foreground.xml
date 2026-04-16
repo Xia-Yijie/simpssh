@@ -5,37 +5,51 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Terminal window body (rounded rectangle) -->
+    <!-- Terminal window body, scaled up to fill more of the safe zone -->
     <path
-        android:pathData="M22,30 L86,30 A4,4 0 0 1 90,34 L90,78 A4,4 0 0 1 86,82 L22,82 A4,4 0 0 1 18,78 L18,34 A4,4 0 0 1 22,30 Z"
+        android:pathData="M18,26 L90,26 A4,4 0 0 1 94,30 L94,82 A4,4 0 0 1 90,86 L18,86 A4,4 0 0 1 14,82 L14,30 A4,4 0 0 1 18,26 Z"
         android:fillColor="#1A2535"/>
 
     <!-- Title bar -->
     <path
-        android:pathData="M22,30 L86,30 A4,4 0 0 1 90,34 L90,42 L18,42 L18,34 A4,4 0 0 1 22,30 Z"
+        android:pathData="M18,26 L90,26 A4,4 0 0 1 94,30 L94,38 L14,38 L14,30 A4,4 0 0 1 18,26 Z"
         android:fillColor="#2A3548"/>
 
     <!-- Window control dots -->
     <path
-        android:pathData="M27,36 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z"
+        android:pathData="M22,32 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z"
         android:fillColor="#FF5F56"/>
     <path
-        android:pathData="M34,36 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z"
+        android:pathData="M29,32 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z"
         android:fillColor="#FFBD2E"/>
     <path
-        android:pathData="M41,36 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z"
+        android:pathData="M36,32 m-2.6,0 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z"
         android:fillColor="#27C93F"/>
 
-    <!-- "SIMPSSH" centered inside the window, 5x7 pixel-font path. -->
+    <!-- "> SIMPSSH" rendered as a 7x8 pixel-font path (chevron is 5x8). -->
+    <!-- Spans x=26..83, y=59..66 inside the 80-wide window content area. -->
     <path
         android:fillColor="#27C93F"
         android:pathData="
-            M36,58 h4 v1 h-4 Z   M35,59 h1 v2 h-1 Z   M36,61 h3 v1 h-3 Z   M39,62 h1 v2 h-1 Z   M35,64 h4 v1 h-4 Z
-            M41,58 h3 v1 h-3 Z   M42,59 h1 v5 h-1 Z   M41,64 h3 v1 h-3 Z
-            M45,58 h1 v7 h-1 Z   M49,58 h1 v7 h-1 Z   M46,59 h1 v1 h-1 Z   M48,59 h1 v1 h-1 Z   M47,60 h1 v1 h-1 Z
-            M51,58 h1 v7 h-1 Z   M52,58 h3 v1 h-3 Z   M55,59 h1 v2 h-1 Z   M52,61 h3 v1 h-3 Z
-            M58,58 h4 v1 h-4 Z   M57,59 h1 v2 h-1 Z   M58,61 h3 v1 h-3 Z   M61,62 h1 v2 h-1 Z   M57,64 h4 v1 h-4 Z
-            M64,58 h4 v1 h-4 Z   M63,59 h1 v2 h-1 Z   M64,61 h3 v1 h-3 Z   M67,62 h1 v2 h-1 Z   M63,64 h4 v1 h-4 Z
-            M69,58 h1 v7 h-1 Z   M73,58 h1 v7 h-1 Z   M70,61 h3 v1 h-3 Z
+            M26,60 h2 v1 h-2 Z   M27,61 h2 v1 h-2 Z   M28,62 h2 v1 h-2 Z   M29,63 h2 v1 h-2 Z
+            M28,64 h2 v1 h-2 Z   M27,65 h2 v1 h-2 Z   M26,66 h2 v1 h-2 Z
+
+            M33,59 h5 v1 h-5 Z   M32,60 h1 v2 h-1 Z   M38,60 h1 v1 h-1 Z   M33,62 h5 v1 h-5 Z
+            M38,63 h1 v2 h-1 Z   M32,65 h1 v1 h-1 Z   M38,65 h1 v1 h-1 Z   M33,66 h5 v1 h-5 Z
+
+            M40,59 h3 v1 h-3 Z   M41,60 h1 v6 h-1 Z   M40,66 h3 v1 h-3 Z
+
+            M44,59 h1 v8 h-1 Z   M50,59 h1 v8 h-1 Z   M45,60 h1 v1 h-1 Z   M49,60 h1 v1 h-1 Z
+            M46,61 h1 v1 h-1 Z   M48,61 h1 v1 h-1 Z   M47,62 h1 v1 h-1 Z
+
+            M52,59 h1 v8 h-1 Z   M53,59 h5 v1 h-5 Z   M58,60 h1 v2 h-1 Z   M53,62 h5 v1 h-5 Z
+
+            M61,59 h5 v1 h-5 Z   M60,60 h1 v2 h-1 Z   M66,60 h1 v1 h-1 Z   M61,62 h5 v1 h-5 Z
+            M66,63 h1 v2 h-1 Z   M60,65 h1 v1 h-1 Z   M66,65 h1 v1 h-1 Z   M61,66 h5 v1 h-5 Z
+
+            M69,59 h5 v1 h-5 Z   M68,60 h1 v2 h-1 Z   M74,60 h1 v1 h-1 Z   M69,62 h5 v1 h-5 Z
+            M74,63 h1 v2 h-1 Z   M68,65 h1 v1 h-1 Z   M74,65 h1 v1 h-1 Z   M69,66 h5 v1 h-5 Z
+
+            M76,59 h1 v8 h-1 Z   M82,59 h1 v8 h-1 Z   M77,62 h5 v1 h-5 Z
         "/>
 </vector>
