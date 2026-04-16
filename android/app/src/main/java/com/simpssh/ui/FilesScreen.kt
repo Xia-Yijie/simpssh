@@ -21,25 +21,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.NoteAdd
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -139,9 +124,9 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Default.Folder, null,
-                modifier = Modifier.size(18.dp),
+            NerdIcon(
+                NerdGlyphs.FOLDER, null,
+                size = 18.dp,
                 tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.width(8.dp))
@@ -152,12 +137,12 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 maxLines = 1,
             )
             IconButton(onClick = { gotoOpen = true }) {
-                Icon(Icons.Default.Home, "切换根路径")
+                NerdIcon(NerdGlyphs.HOME, "切换根路径", size = 20.dp)
             }
             IconButton(onClick = {
                 scope.launch { manager.loadChildren(tab, tab.rootPath) }
             }) {
-                Icon(Icons.Default.Refresh, "刷新")
+                NerdIcon(NerdGlyphs.REFRESH, "刷新", size = 20.dp)
             }
         }
 
@@ -346,26 +331,26 @@ private fun TreeRowView(
         // Chevron column (only for dirs; files get matching width to align)
         Box(modifier = Modifier.size(CHEVRON_COL_SIZE), contentAlignment = Alignment.Center) {
             if (entry.isDir) {
-                Icon(
-                    if (isExpanded) Icons.Default.ExpandMore
-                    else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                NerdIcon(
+                    if (isExpanded) NerdGlyphs.CHEVRON_DOWN else NerdGlyphs.CHEVRON_RIGHT,
                     null,
-                    modifier = Modifier.size(18.dp),
+                    size = 14.dp,
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 )
             }
         }
-        // File / folder icon
-        Icon(
-            when {
-                entry.isDir && isExpanded -> Icons.Default.FolderOpen
-                entry.isDir -> Icons.Default.Folder
-                else -> Icons.AutoMirrored.Filled.InsertDriveFile
+        // File / folder icon — folders use the FA folder glyph; files use the
+        // extension-derived glyph for VSCode-style file icons.
+        NerdIcon(
+            glyph = when {
+                entry.isDir && isExpanded -> NerdGlyphs.FOLDER_OPEN
+                entry.isDir -> NerdGlyphs.FOLDER
+                else -> glyphForFile(entry.name)
             },
-            null,
-            modifier = Modifier.size(18.dp),
+            contentDescription = null,
+            size = 18.dp,
             tint = if (entry.isDir) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
         )
         Spacer(Modifier.width(CHEVRON_ICON_GAP))
         Text(
@@ -376,40 +361,40 @@ private fun TreeRowView(
         )
         Box {
             IconButton(onClick = { menu = true }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.MoreVert, "更多", modifier = Modifier.size(16.dp))
+                NerdIcon(NerdGlyphs.ELLIPSIS_V, "更多", size = 16.dp)
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 onMkdirHere?.let {
                     DropdownMenuItem(
                         text = { Text("在此处新建目录") },
                         onClick = { menu = false; it() },
-                        leadingIcon = { Icon(Icons.Default.NoteAdd, null) },
+                        leadingIcon = { NerdIcon(NerdGlyphs.FOLDER_PLUS, null, size = 18.dp) },
                     )
                 }
                 onUploadHere?.let {
                     DropdownMenuItem(
                         text = { Text("上传文件到此处") },
                         onClick = { menu = false; it() },
-                        leadingIcon = { Icon(Icons.Default.Upload, null) },
+                        leadingIcon = { NerdIcon(NerdGlyphs.UPLOAD, null, size = 18.dp) },
                     )
                 }
                 onDownload?.let {
                     DropdownMenuItem(
                         text = { Text("下载到本机") },
                         onClick = { menu = false; it() },
-                        leadingIcon = { Icon(Icons.Default.Download, null) },
+                        leadingIcon = { NerdIcon(NerdGlyphs.DOWNLOAD, null, size = 18.dp) },
                     )
                 }
                 DropdownMenuItem(
                     text = { Text("重命名") },
                     onClick = { menu = false; onRename() },
-                    leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null) },
+                    leadingIcon = { NerdIcon(NerdGlyphs.PENCIL, null, size = 18.dp) },
                 )
                 DropdownMenuItem(
                     text = { Text("删除") },
                     onClick = { menu = false; onDelete() },
                     leadingIcon = {
-                        Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                        NerdIcon(NerdGlyphs.TRASH, null, size = 18.dp, tint = MaterialTheme.colorScheme.error)
                     },
                 )
             }

@@ -16,13 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -64,7 +58,7 @@ fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
                 TopAppBar(
                     title = { Text("会话") },
                     navigationIcon = {
-                        IconButton(onClick = onHome) { Icon(Icons.Default.Home, "首页") }
+                        IconButton(onClick = onHome) { NerdIcon(NerdGlyphs.HOME, "首页", size = 20.dp) }
                     },
                 )
                 if (manager.tabs.isNotEmpty()) {
@@ -86,7 +80,7 @@ fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
                                             onClick = { manager.close(t.id) },
                                             modifier = Modifier.size(20.dp),
                                         ) {
-                                            Icon(Icons.Default.Close, "关闭", modifier = Modifier.size(16.dp))
+                                            NerdIcon(NerdGlyphs.TIMES, "关闭", size = 14.dp)
                                         }
                                     }
                                 },
@@ -127,7 +121,7 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
                     selected = tab.view == TabState.View.Terminal,
                     onClick = { tab.view = TabState.View.Terminal },
                     shape = SegmentedButtonDefaults.itemShape(0, 2),
-                    icon = { Icon(Icons.Default.Terminal, null, modifier = Modifier.size(16.dp)) },
+                    icon = { NerdIcon(NerdGlyphs.TERMINAL, null, size = 16.dp) },
                 ) {
                     Text("Terminal")
                 }
@@ -135,7 +129,7 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
                     selected = tab.view == TabState.View.Files,
                     onClick = { tab.view = TabState.View.Files },
                     shape = SegmentedButtonDefaults.itemShape(1, 2),
-                    icon = { Icon(Icons.Default.Folder, null, modifier = Modifier.size(16.dp)) },
+                    icon = { NerdIcon(NerdGlyphs.FOLDER, null, size = 16.dp) },
                 ) {
                     Text("Files")
                 }

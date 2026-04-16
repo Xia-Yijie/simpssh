@@ -22,17 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.HelpOutline
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,7 +32,6 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -95,7 +83,7 @@ fun ServerListScreen(
                 actions = {
                     if (openSessionCount > 0) {
                         TextButton(onClick = onShowSessions) {
-                            Icon(Icons.Default.Terminal, null)
+                            NerdIcon(NerdGlyphs.TERMINAL, null, size = 16.dp)
                             Spacer(Modifier.width(4.dp))
                             Text("会话 ($openSessionCount)")
                         }
@@ -110,13 +98,13 @@ fun ServerListScreen(
             ) {
                 ExtendedFloatingActionButton(
                     onClick = onAdd,
-                    icon = { Icon(Icons.Default.Add, null) },
+                    icon = { NerdIcon(NerdGlyphs.PLUS, null, size = 20.dp) },
                     text = { Text("添加服务器") },
                     modifier = Modifier.widthIn(min = 180.dp),
                 )
                 ExtendedFloatingActionButton(
                     onClick = { showGuide = true },
-                    icon = { Icon(Icons.AutoMirrored.Filled.HelpOutline, null) },
+                    icon = { NerdIcon(NerdGlyphs.HELP, null, size = 20.dp) },
                     text = { Text("操作指南") },
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -160,10 +148,10 @@ private fun EmptyState(padding: PaddingValues) {
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Default.Cloud,
+            NerdIcon(
+                NerdGlyphs.CLOUD,
                 contentDescription = null,
-                modifier = Modifier.size(72.dp),
+                size = 72.dp,
                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
             )
             Spacer(Modifier.height(20.dp))
@@ -209,9 +197,10 @@ private fun ServerCard(
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Default.Terminal,
+                    NerdIcon(
+                        NerdGlyphs.TERMINAL,
                         null,
+                        size = 22.dp,
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
@@ -229,9 +218,10 @@ private fun ServerCard(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                     )
                 }
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                NerdIcon(
+                    if (expanded) NerdGlyphs.CHEVRON_UP else NerdGlyphs.CHEVRON_DOWN,
                     null,
+                    size = 18.dp,
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
@@ -278,7 +268,7 @@ private fun ScriptOption(label: String, onConnect: () -> Unit) {
             ),
             modifier = Modifier.size(36.dp),
         ) {
-            Icon(Icons.Default.PlayArrow, "连接", modifier = Modifier.size(20.dp))
+            NerdIcon(NerdGlyphs.PLAY, "连接", size = 16.dp)
         }
     }
 }
@@ -360,7 +350,7 @@ fun ServerEditScreen(
             TopAppBar(
                 title = { Text(if (initial == null) "新建服务器" else "编辑服务器") },
                 navigationIcon = {
-                    IconButton(onClick = onCancel) { Icon(Icons.Default.ArrowBack, null) }
+                    IconButton(onClick = onCancel) { NerdIcon(NerdGlyphs.ARROW_LEFT, null, size = 20.dp) }
                 },
             )
         },
@@ -429,7 +419,7 @@ fun ServerEditScreen(
                 onClick = { scripts += InitScript(name = "新脚本", content = "") },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(Icons.Default.Add, null)
+                NerdIcon(NerdGlyphs.PLUS, null, size = 18.dp)
                 Spacer(Modifier.width(6.dp))
                 Text("添加一条脚本")
             }
@@ -464,7 +454,7 @@ fun ServerEditScreen(
                         contentColor = MaterialTheme.colorScheme.error,
                     ),
                 ) {
-                    Icon(Icons.Default.Delete, null)
+                    NerdIcon(NerdGlyphs.TRASH, null, size = 18.dp, tint = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.width(6.dp))
                     Text("删除此服务器")
                 }
@@ -493,7 +483,7 @@ private fun ScriptEditor(
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, "删除", tint = MaterialTheme.colorScheme.error)
+                    NerdIcon(NerdGlyphs.TRASH, "删除", size = 20.dp, tint = MaterialTheme.colorScheme.error)
                 }
             }
             Spacer(Modifier.height(8.dp))
