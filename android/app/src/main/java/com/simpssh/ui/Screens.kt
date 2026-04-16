@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -92,7 +93,11 @@ fun ServerListScreen(
             )
         },
         floatingActionButton = {
+            // IntrinsicSize.Max + fillMaxWidth on each child: all 3 FABs end
+            // up the width of the widest (添加服务器), so 操作指南 / 设置
+            // line up under it instead of being narrower chips.
             Column(
+                modifier = Modifier.width(IntrinsicSize.Max),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -107,6 +112,7 @@ fun ServerListScreen(
                     text = { Text("操作指南") },
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 ExtendedFloatingActionButton(
                     onClick = onShowSettings,
@@ -114,6 +120,7 @@ fun ServerListScreen(
                     text = { Text("设置") },
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
