@@ -35,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SegmentedButton
@@ -67,6 +68,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uniffi.simpssh_core.StyledRow
 
+private val SessionsDarkScheme = darkColorScheme(
+    background       = Color(0xFF0B0E12),
+    surface          = Color(0xFF12161C),
+    surfaceVariant   = Color(0xFF1A2027),
+    onSurface        = Color(0xFFE6E8EB),
+    onSurfaceVariant = Color(0xFFB7BEC9),
+    primary          = Color(0xFF8AB4F8),
+    onPrimary        = Color(0xFF0B1A33),
+    primaryContainer = Color(0xFF1F3358),
+    onPrimaryContainer = Color(0xFFD7E3FF),
+    outline          = Color(0xFF40474F),
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
@@ -77,6 +91,7 @@ fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
         if (manager.tabs.isEmpty()) onHome()
     }
 
+    MaterialTheme(colorScheme = SessionsDarkScheme) {
     Scaffold(
         topBar = {
             Column {
@@ -121,6 +136,7 @@ fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
                 SessionBody(active, manager)
             }
         }
+    }
     }
 }
 
@@ -175,9 +191,11 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
 @Composable
 private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (ByteArray) -> Unit) {
     val listState = rememberLazyListState()
-    LaunchedEffect(tab.rows.size) {
+    // Instant scroll-to-bottom on any change to the rows (size or content of
+    // the last row), so soft-keyboard reflows still leave the prompt visible.
+    LaunchedEffect(tab.rows.size, tab.rows.lastOrNull()?.text) {
         if (tab.rows.isNotEmpty()) {
-            runCatching { listState.animateScrollToItem(tab.rows.lastIndex) }
+            runCatching { listState.scrollToItem(tab.rows.lastIndex) }
         }
     }
 
