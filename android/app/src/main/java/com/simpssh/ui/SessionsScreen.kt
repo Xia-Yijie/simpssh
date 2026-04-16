@@ -3,6 +3,7 @@ package com.simpssh.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -42,17 +44,27 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uniffi.simpssh_core.StyledRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,7 +162,7 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
 
         Box(modifier = Modifier.fillMaxSize()) {
             when (tab.view) {
-                TabState.View.Terminal -> ShellBody(tab) { bytes ->
+                TabState.View.Terminal -> ShellBody(tab, manager) { bytes ->
                     manager.send(tab.id, bytes)
                 }
                 TabState.View.Files -> FilesBody(tab, manager)
@@ -160,7 +172,7 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
 }
 
 @Composable
-private fun ShellBody(tab: TabState, onSendBytes: (ByteArray) -> Unit) {
+private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (ByteArray) -> Unit) {
     val listState = rememberLazyListState()
     LaunchedEffect(tab.rows.size) {
         if (tab.rows.isNotEmpty()) {
@@ -185,19 +197,30 @@ private fun ShellBody(tab: TabState, onSendBytes: (ByteArray) -> Unit) {
                 modifier = Modifier.padding(8.dp),
             )
         }
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth().weight(1f)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                .background(TerminalBackground),
         ) {
+            val termStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            val measurer = rememberTextMeasurer()
+            val sample = remember(termStyle) { measurer.measure(AnnotatedString("M"), termStyle) }
+            val padPx = with(LocalDensity.current) { 12.dp.toPx() }
+            val cols = (((constraints.maxWidth - 2 * padPx) / sample.size.width).toInt()).coerceAtLeast(20)
+            val rows = (((constraints.maxHeight - 2 * padPx) / sample.size.height).toInt()).coerceAtLeast(5)
+
+            LaunchedEffect(cols, rows) {
+                manager.resizeTerminal(tab.id, cols.toUShort(), rows.toUShort())
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(12.dp),
             ) {
-                items(tab.rows) { line ->
+                items(tab.rows) { row ->
                     Text(
-                        line,
-                        style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                        row.toAnnotatedString(),
+                        style = termStyle,
                     )
                 }
             }
@@ -268,6 +291,32 @@ private fun TerminalInput(
             shadow = TextFieldValue("")
         }),
     )
+}
+
+// Default terminal background — matches the DEFAULT_BG in Rust so cells with
+// no explicit background blend with the surrounding container.
+private val TerminalBackground = Color(0xFF000000)
+
+private fun StyledRow.toAnnotatedString(): AnnotatedString {
+    val b = AnnotatedString.Builder()
+    b.append(text)
+    spans.forEach { sp ->
+        val fg = Color(0xFF000000.toInt() or sp.fg.toInt())
+        val bg = Color(0xFF000000.toInt() or sp.bg.toInt())
+        val flags = sp.flags.toInt()
+        b.addStyle(
+            SpanStyle(
+                color = fg,
+                background = bg,
+                fontWeight = if (flags and 0b0001 != 0) FontWeight.Bold else null,
+                fontStyle = if (flags and 0b0010 != 0) FontStyle.Italic else null,
+                textDecoration = if (flags and 0b0100 != 0) TextDecoration.Underline else null,
+            ),
+            sp.start.toInt(),
+            (sp.start + sp.len).toInt().coerceAtMost(text.length),
+        )
+    }
+    return b.toAnnotatedString()
 }
 
 private fun commonPrefixLen(a: String, b: String): Int {

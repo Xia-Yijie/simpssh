@@ -758,6 +758,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -827,7 +831,11 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_simpssh_core_fn_method_terminalview_feed(`ptr`: Pointer,`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_simpssh_core_fn_method_terminalview_resize(`ptr`: Pointer,`columns`: Short,`rows`: Short,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_simpssh_core_fn_method_terminalview_snapshot(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_simpssh_core_fn_method_terminalview_snapshot_styled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_simpssh_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -973,7 +981,11 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_simpssh_core_checksum_method_terminalview_feed(
     ): Short
+    fun uniffi_simpssh_core_checksum_method_terminalview_resize(
+    ): Short
     fun uniffi_simpssh_core_checksum_method_terminalview_snapshot(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_terminalview_snapshot_styled(
     ): Short
     fun uniffi_simpssh_core_checksum_constructor_sftpsession_connect_password(
     ): Short
@@ -1046,7 +1058,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_simpssh_core_checksum_method_terminalview_feed() != 18185.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot() != 21078.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_resize() != 3901.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot() != 26544.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot_styled() != 17086.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_constructor_sftpsession_connect_password() != 54200.toShort()) {
@@ -2117,9 +2135,6 @@ public object FfiConverterTypeSshSession: FfiConverter<SshSession, Pointer> {
 //
 
 
-/**
- * Headless VT100/xterm terminal. Exposed to Kotlin/Swift as an opaque handle.
- */
 public interface TerminalViewInterface {
     
     fun `cursor`(): CursorPos
@@ -2127,16 +2142,26 @@ public interface TerminalViewInterface {
     fun `feed`(`bytes`: kotlin.ByteArray)
     
     /**
-     * Visible rows, trailing spaces trimmed, styling dropped (for now).
+     * Resize the terminal grid. Caller should also resize the remote PTY
+     * (via SshSession::resize) so the shell knows the new dimensions.
+     */
+    fun `resize`(`columns`: kotlin.UShort, `rows`: kotlin.UShort)
+    
+    /**
+     * Plain-text snapshot, kept for any consumer that doesn't want styling.
+     * Trims trailing spaces per row.
      */
     fun `snapshot`(): List<kotlin.String>
+    
+    /**
+     * Snapshot with per-cell colour and style, run-length encoded into spans
+     * over each row's `text`. Use this to render a coloured terminal in the UI.
+     */
+    fun `snapshotStyled`(): List<StyledRow>
     
     companion object
 }
 
-/**
- * Headless VT100/xterm terminal. Exposed to Kotlin/Swift as an opaque handle.
- */
 open class TerminalView: Disposable, AutoCloseable, TerminalViewInterface {
 
     constructor(pointer: Pointer) {
@@ -2250,12 +2275,44 @@ open class TerminalView: Disposable, AutoCloseable, TerminalViewInterface {
 
     
     /**
-     * Visible rows, trailing spaces trimmed, styling dropped (for now).
+     * Resize the terminal grid. Caller should also resize the remote PTY
+     * (via SshSession::resize) so the shell knows the new dimensions.
+     */override fun `resize`(`columns`: kotlin.UShort, `rows`: kotlin.UShort)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_resize(
+        it, FfiConverterUShort.lower(`columns`),FfiConverterUShort.lower(`rows`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Plain-text snapshot, kept for any consumer that doesn't want styling.
+     * Trims trailing spaces per row.
      */override fun `snapshot`(): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_snapshot(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Snapshot with per-cell colour and style, run-length encoded into spans
+     * over each row's `text`. Use this to render a coloured terminal in the UI.
+     */override fun `snapshotStyled`(): List<StyledRow> {
+            return FfiConverterSequenceTypeStyledRow.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_snapshot_styled(
         it, _status)
 }
     }
@@ -2380,6 +2437,89 @@ public object FfiConverterTypeDirEntry: FfiConverterRustBuffer<DirEntry> {
             FfiConverterBoolean.write(value.`isDir`, buf)
             FfiConverterBoolean.write(value.`isLink`, buf)
             FfiConverterUInt.write(value.`mode`, buf)
+    }
+}
+
+
+
+/**
+ * One run of consecutive cells sharing the same fg/bg/flags. Offsets are
+ * in UTF-16 code units, matching Java/Kotlin string indexing.
+ */
+data class StyleSpan (
+    var `start`: kotlin.UInt, 
+    var `len`: kotlin.UInt, 
+    var `fg`: kotlin.UInt, 
+    var `bg`: kotlin.UInt, 
+    /**
+     * bit 0 = bold, 1 = italic, 2 = underline, 3 = inverse (fg/bg already swapped)
+     */
+    var `flags`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStyleSpan: FfiConverterRustBuffer<StyleSpan> {
+    override fun read(buf: ByteBuffer): StyleSpan {
+        return StyleSpan(
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: StyleSpan) = (
+            FfiConverterUInt.allocationSize(value.`start`) +
+            FfiConverterUInt.allocationSize(value.`len`) +
+            FfiConverterUInt.allocationSize(value.`fg`) +
+            FfiConverterUInt.allocationSize(value.`bg`) +
+            FfiConverterUInt.allocationSize(value.`flags`)
+    )
+
+    override fun write(value: StyleSpan, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`start`, buf)
+            FfiConverterUInt.write(value.`len`, buf)
+            FfiConverterUInt.write(value.`fg`, buf)
+            FfiConverterUInt.write(value.`bg`, buf)
+            FfiConverterUInt.write(value.`flags`, buf)
+    }
+}
+
+
+
+data class StyledRow (
+    var `text`: kotlin.String, 
+    var `spans`: List<StyleSpan>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStyledRow: FfiConverterRustBuffer<StyledRow> {
+    override fun read(buf: ByteBuffer): StyledRow {
+        return StyledRow(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeStyleSpan.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: StyledRow) = (
+            FfiConverterString.allocationSize(value.`text`) +
+            FfiConverterSequenceTypeStyleSpan.allocationSize(value.`spans`)
+    )
+
+    override fun write(value: StyledRow, buf: ByteBuffer) {
+            FfiConverterString.write(value.`text`, buf)
+            FfiConverterSequenceTypeStyleSpan.write(value.`spans`, buf)
     }
 }
 
@@ -2673,6 +2813,62 @@ public object FfiConverterSequenceTypeDirEntry: FfiConverterRustBuffer<List<DirE
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeDirEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeStyleSpan: FfiConverterRustBuffer<List<StyleSpan>> {
+    override fun read(buf: ByteBuffer): List<StyleSpan> {
+        val len = buf.getInt()
+        return List<StyleSpan>(len) {
+            FfiConverterTypeStyleSpan.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<StyleSpan>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeStyleSpan.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<StyleSpan>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeStyleSpan.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeStyledRow: FfiConverterRustBuffer<List<StyledRow>> {
+    override fun read(buf: ByteBuffer): List<StyledRow> {
+        val len = buf.getInt()
+        return List<StyledRow>(len) {
+            FfiConverterTypeStyledRow.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<StyledRow>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeStyledRow.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<StyledRow>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeStyledRow.write(it, buf)
         }
     }
 }

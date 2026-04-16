@@ -17,6 +17,7 @@ import kotlinx.coroutines.withContext
 import uniffi.simpssh_core.DirEntry
 import uniffi.simpssh_core.SftpSession
 import uniffi.simpssh_core.SshSession
+import uniffi.simpssh_core.StyledRow
 import uniffi.simpssh_core.TerminalView
 import java.util.UUID
 
@@ -36,9 +37,13 @@ class TabState(
     var shellStatus by mutableStateOf("连接中…")
     var sshSession: SshSession? = null
     var term: TerminalView? = null
-    val rows: SnapshotStateList<String> = mutableStateListOf()
+    val rows: SnapshotStateList<StyledRow> = mutableStateListOf()
     var cursor by mutableStateOf("(0,0)")
     var readerJob: Job? = null
+    /// Last known terminal grid size. Tracked so `resizeTerminal` can no-op
+    /// when called repeatedly with the same dimensions on every recompose.
+    var cols: UShort = DEFAULT_TERM_COLS
+    var terminalRows: UShort = DEFAULT_TERM_ROWS
 
     // ---- Files (lazy) -------------------------------------------------------
     var filesStatus by mutableStateOf("未连接")
@@ -99,7 +104,7 @@ class SessionManager(private val scope: CoroutineScope) {
                     val chunk = runCatching { s.read(SHELL_READ_TIMEOUT_MS) }.getOrNull() ?: break
                     if (chunk.isNotEmpty()) {
                         t.feed(chunk)
-                        val snap = t.snapshot()
+                        val snap = t.snapshotStyled()
                         val cur = t.cursor()
                         val cursorStr = "(${cur.row},${cur.col})"
                         withContext(Dispatchers.Main) {
@@ -126,6 +131,21 @@ class SessionManager(private val scope: CoroutineScope) {
     fun send(tabId: String, bytes: ByteArray) {
         val s = tabs.firstOrNull { it.id == tabId }?.sshSession ?: return
         scope.launch(Dispatchers.IO) { runCatching { s.write(bytes) } }
+    }
+
+    /// Resize the local terminal grid + the remote PTY. Called when the
+    /// rendered terminal area changes (orientation flip, soft-keyboard show
+    /// / hide, tab switch on different aspect).
+    fun resizeTerminal(tabId: String, cols: UShort, rows: UShort) {
+        val tab = tabs.firstOrNull { it.id == tabId } ?: return
+        if (tab.cols == cols && tab.terminalRows == rows) return
+        tab.cols = cols
+        tab.terminalRows = rows
+        tab.term?.resize(cols, rows)
+        val s = tab.sshSession
+        if (s != null) {
+            scope.launch(Dispatchers.IO) { runCatching { s.resize(cols, rows) } }
+        }
     }
 
     // ---- Files --------------------------------------------------------------

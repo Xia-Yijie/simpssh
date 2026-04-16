@@ -15,4 +15,4 @@ mod terminal;
 
 pub use sftp::{DirEntry, SftpError, SftpSession};
 pub use ssh::{SshError, SshSession};
-pub use terminal::{CursorPos, TerminalView};
+pub use terminal::{CursorPos, StyleSpan, StyledRow, TerminalView};
