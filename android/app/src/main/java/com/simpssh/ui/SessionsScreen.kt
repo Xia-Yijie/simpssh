@@ -1,6 +1,7 @@
 package com.simpssh.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,6 +19,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -232,6 +236,7 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                 manager.resizeTerminal(tab.id, cols.toUShort(), rows.toUShort())
             }
 
+            // Visible terminal grid
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(12.dp),
@@ -242,11 +247,51 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                     Text(withCursor, style = termStyle)
                 }
             }
+
+            // Invisible BasicTextField overlaying the terminal area. It owns
+            // the IME connection — tapping anywhere in the grid focuses it
+            // and brings up the soft keyboard. Renders nothing visible
+            // (matchParentSize + alpha 0). Each typed char is sent
+            // immediately via the delta logic in onValueChange.
+            var shadow by remember(tab.id) { mutableStateOf(TextFieldValue("")) }
+            BasicTextField(
+                value = shadow,
+                onValueChange = { new ->
+                    val oldText = shadow.text
+                    val newText = new.text
+                    if (newText != oldText) {
+                        val common = commonPrefixLen(oldText, newText)
+                        val toDelete = oldText.length - common
+                        val toAdd = newText.substring(common)
+                        if (toDelete > 0) onSendBytes(ByteArray(toDelete) { 0x7F })
+                        if (toAdd.isNotEmpty()) onSendBytes(toAdd.toByteArray())
+                    }
+                    shadow = new
+                },
+                modifier = Modifier
+                    .matchParentSize()
+                    .alpha(0f)
+                    .onPreviewKeyEvent { ev ->
+                        if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        val bytes = specialKeyBytes(ev) ?: return@onPreviewKeyEvent false
+                        onSendBytes(bytes)
+                        true
+                    },
+                singleLine = true,
+                cursorBrush = SolidColor(Color.Transparent),
+                textStyle = TextStyle(color = Color.Transparent),
+                keyboardOptions = KeyboardOptions(
+                    autoCorrect = false,
+                    capitalization = KeyboardCapitalization.None,
+                    keyboardType = KeyboardType.Ascii,
+                    imeAction = ImeAction.Send,
+                ),
+                keyboardActions = KeyboardActions(onSend = {
+                    onSendBytes(byteArrayOf(0x0D))
+                    shadow = TextFieldValue("")
+                }),
+            )
         }
-        TerminalInput(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
-            onSendBytes = onSendBytes,
-        )
         Text(
             "光标 (${tab.cursorRow},${tab.cursorCol})  ·  ${tab.cols.toInt()}×${tab.terminalRows.toInt()}",
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
@@ -254,61 +299,6 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )
     }
-}
-
-/// Per-keystroke input for the terminal.
-///
-/// We never display what the user types in this field — the local text style
-/// is transparent so they only see characters echoed back from the remote
-/// shell. The local TextFieldValue is used purely as a "shadow" so the IME
-/// has something to delete with Backspace; on every change we diff old vs
-/// new and send the delta as bytes.
-///
-/// Hardware keyboard special keys (Esc / Tab / arrows / Ctrl-letter) are
-/// caught via `onPreviewKeyEvent` and translated to the matching escape
-/// sequences. Soft keyboards usually lack these, so for now those operations
-/// require a hardware keyboard.
-@Composable
-private fun TerminalInput(
-    modifier: Modifier = Modifier,
-    onSendBytes: (ByteArray) -> Unit,
-) {
-    var shadow by remember { mutableStateOf(TextFieldValue("")) }
-
-    OutlinedTextField(
-        value = shadow,
-        onValueChange = { new ->
-            val oldText = shadow.text
-            val newText = new.text
-            if (newText != oldText) {
-                val common = commonPrefixLen(oldText, newText)
-                val toDelete = oldText.length - common
-                val toAdd = newText.substring(common)
-                if (toDelete > 0) onSendBytes(ByteArray(toDelete) { 0x7F })
-                if (toAdd.isNotEmpty()) onSendBytes(toAdd.toByteArray())
-            }
-            shadow = new
-        },
-        modifier = modifier.onPreviewKeyEvent { ev ->
-            if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            val bytes = specialKeyBytes(ev) ?: return@onPreviewKeyEvent false
-            onSendBytes(bytes)
-            true
-        },
-        singleLine = true,
-        textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.Transparent),
-        placeholder = { Text("点这里调出键盘 — 按键即发送") },
-        keyboardOptions = KeyboardOptions(
-            autoCorrect = false,
-            capitalization = KeyboardCapitalization.None,
-            keyboardType = KeyboardType.Ascii,
-            imeAction = ImeAction.Send,
-        ),
-        keyboardActions = KeyboardActions(onSend = {
-            onSendBytes(byteArrayOf('\r'.code.toByte()))
-            shadow = TextFieldValue("")
-        }),
-    )
 }
 
 // Default terminal background — matches the DEFAULT_BG in Rust so cells with
