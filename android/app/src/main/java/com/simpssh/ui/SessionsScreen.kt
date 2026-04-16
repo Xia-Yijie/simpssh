@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -217,11 +218,10 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(12.dp),
             ) {
-                items(tab.rows) { row ->
-                    Text(
-                        row.toAnnotatedString(),
-                        style = termStyle,
-                    )
+                itemsIndexed(tab.rows) { i, row ->
+                    val ann = row.toAnnotatedString()
+                    val withCursor = if (i == tab.cursorRow) addCursorBlock(ann, tab.cursorCol) else ann
+                    Text(withCursor, style = termStyle)
                 }
             }
         }
@@ -230,7 +230,7 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
             onSendBytes = onSendBytes,
         )
         Text(
-            "光标 ${tab.cursor}",
+            "光标 (${tab.cursorRow},${tab.cursorCol})  ·  ${tab.cols.toInt()}×${tab.terminalRows.toInt()}",
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
@@ -296,6 +296,24 @@ private fun TerminalInput(
 // Default terminal background — matches the DEFAULT_BG in Rust so cells with
 // no explicit background blend with the surrounding container.
 private val TerminalBackground = Color(0xFF000000)
+
+private val CursorBg = Color(0xFFD3D7CF.toInt())   // matches default fg → block cursor
+private val CursorFg = Color(0xFF000000.toInt())   // black char on light block
+
+private fun addCursorBlock(s: AnnotatedString, col: Int): AnnotatedString {
+    if (col < 0) return s
+    // Pad with spaces if the cursor is past the end of the row text.
+    val padded = if (col >= s.length) {
+        AnnotatedString.Builder(s).apply { append(" ".repeat(col - s.length + 1)) }.toAnnotatedString()
+    } else s
+    val b = AnnotatedString.Builder(padded)
+    b.addStyle(
+        SpanStyle(background = CursorBg, color = CursorFg),
+        col,
+        col + 1,
+    )
+    return b.toAnnotatedString()
+}
 
 private fun StyledRow.toAnnotatedString(): AnnotatedString {
     val b = AnnotatedString.Builder()

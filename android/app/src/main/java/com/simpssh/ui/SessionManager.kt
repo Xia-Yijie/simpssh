@@ -38,7 +38,8 @@ class TabState(
     var sshSession: SshSession? = null
     var term: TerminalView? = null
     val rows: SnapshotStateList<StyledRow> = mutableStateListOf()
-    var cursor by mutableStateOf("(0,0)")
+    var cursorRow: Int by mutableStateOf(0)
+    var cursorCol: Int by mutableStateOf(0)
     var readerJob: Job? = null
     /// Last known terminal grid size. Tracked so `resizeTerminal` can no-op
     /// when called repeatedly with the same dimensions on every recompose.
@@ -106,7 +107,8 @@ class SessionManager(private val scope: CoroutineScope) {
                         t.feed(chunk)
                         val snap = t.snapshotStyled()
                         val cur = t.cursor()
-                        val cursorStr = "(${cur.row},${cur.col})"
+                        val newRow = cur.row.toInt()
+                        val newCol = cur.col.toInt()
                         withContext(Dispatchers.Main) {
                             // In-place diff: clear+addAll would force LazyColumn
                             // to drop every row composition. Patch only the rows
@@ -118,7 +120,8 @@ class SessionManager(private val scope: CoroutineScope) {
                                 if (i >= tab.rows.size) tab.rows.add(line)
                                 else if (tab.rows[i] != line) tab.rows[i] = line
                             }
-                            if (cursorStr != tab.cursor) tab.cursor = cursorStr
+                            if (tab.cursorRow != newRow) tab.cursorRow = newRow
+                            if (tab.cursorCol != newCol) tab.cursorCol = newCol
                         }
                     }
                 }
