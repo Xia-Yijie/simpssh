@@ -32,6 +32,12 @@ pub enum SftpError {
 fn io_err(e: impl std::fmt::Display) -> SftpError { SftpError::Io { msg: e.to_string() } }
 
 /// Heuristic: should we attempt one transparent reconnect?
+///
+/// russh-sftp 2.1 / russh 0.60 don't export a typed "session is gone" variant
+/// — they bubble up the underlying io::Error message. Match the substrings
+/// known to mean "the underlying SSH session is dead" so we can re-handshake.
+/// Only `Io` and `Subsystem` errors are eligible; `Connect` and `Auth` errors
+/// must propagate unchanged so we don't loop on bad credentials.
 fn looks_disconnected(err: &SftpError) -> bool {
     let msg = match err {
         SftpError::Io { msg } => msg.as_str(),
@@ -101,7 +107,7 @@ async fn establish(args: &ConnectArgs) -> Result<(Arc<SftpInner>, client::Handle
 pub struct SftpSession {
     runtime: Runtime,
     sftp: Mutex<Arc<SftpInner>>,
-    _client: Mutex<Option<client::Handle<AcceptAny>>>,
+    client: Mutex<Option<client::Handle<AcceptAny>>>,
     creds: ConnectArgs,
 }
 
@@ -109,9 +115,9 @@ impl SftpSession {
     /// Re-handshakes and atomically swaps in the new sftp client + session
     /// handle. Old client handle is dropped, which sends an SSH disconnect.
     fn reconnect(&self) -> Result<(), SftpError> {
-        let (new_sftp, new_client) = self.runtime.block_on(establish(&self.creds))?;
+        let (new_sftp, newclient) = self.runtime.block_on(establish(&self.creds))?;
         *self.sftp.lock().unwrap() = new_sftp;
-        *self._client.lock().unwrap() = Some(new_client);
+        *self.client.lock().unwrap() = Some(newclient);
         Ok(())
     }
 
@@ -153,7 +159,7 @@ impl SftpSession {
         Ok(Arc::new(Self {
             runtime: rt,
             sftp: Mutex::new(sftp),
-            _client: Mutex::new(Some(client)),
+            client: Mutex::new(Some(client)),
             creds,
         }))
     }

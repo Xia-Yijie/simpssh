@@ -27,12 +27,12 @@
         android:fillColor="#27C93F"/>
 
     <!-- "> SIMPSSH" rendered as a 7x8 pixel-font path (chevron is 5x8). -->
-    <!-- ~5-cell gap between > and the word so the space is visible at icon size. -->
+    <!-- Chevron is left-aligned (starts at x=22) with a wide gap before SIMPSSH. -->
     <path
         android:fillColor="#27C93F"
         android:pathData="
-            M26,60 h2 v1 h-2 Z   M27,61 h2 v1 h-2 Z   M28,62 h2 v1 h-2 Z   M29,63 h2 v1 h-2 Z
-            M28,64 h2 v1 h-2 Z   M27,65 h2 v1 h-2 Z   M26,66 h2 v1 h-2 Z
+            M22,60 h2 v1 h-2 Z   M23,61 h2 v1 h-2 Z   M24,62 h2 v1 h-2 Z   M25,63 h2 v1 h-2 Z
+            M24,64 h2 v1 h-2 Z   M23,65 h2 v1 h-2 Z   M22,66 h2 v1 h-2 Z
 
             M37,59 h5 v1 h-5 Z   M36,60 h1 v2 h-1 Z   M42,60 h1 v1 h-1 Z   M37,62 h5 v1 h-5 Z
             M42,63 h1 v2 h-1 Z   M36,65 h1 v1 h-1 Z   M42,65 h1 v1 h-1 Z   M37,66 h5 v1 h-5 Z

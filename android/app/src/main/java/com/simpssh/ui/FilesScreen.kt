@@ -70,6 +70,11 @@ private sealed class TreeRow {
     data class Placeholder(val text: String, val depth: Int, val key: String) : TreeRow()
 }
 
+// Shared by TreeRowView and PlaceholderRow so leading icons line up under
+// each other regardless of which row variant gets rendered.
+private val CHEVRON_COL_SIZE = 20.dp
+private val CHEVRON_ICON_GAP = 8.dp
+
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FilesBody(tab: TabState, manager: SessionManager) {
@@ -307,8 +312,8 @@ private fun PlaceholderRow(text: String, depth: Int) {
             .padding(start = (8 + depth * TREE_INDENT_DP).dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Spacer(Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.size(CHEVRON_COL_SIZE))
+        Spacer(Modifier.width(CHEVRON_ICON_GAP))
         Text(
             text,
             style = MaterialTheme.typography.bodySmall,
@@ -339,7 +344,7 @@ private fun TreeRowView(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Chevron column (only for dirs; files get matching width to align)
-        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(CHEVRON_COL_SIZE), contentAlignment = Alignment.Center) {
             if (entry.isDir) {
                 Icon(
                     if (isExpanded) Icons.Default.ExpandMore
@@ -362,7 +367,7 @@ private fun TreeRowView(
             tint = if (entry.isDir) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(CHEVRON_ICON_GAP))
         Text(
             entry.name,
             modifier = Modifier.weight(1f),
