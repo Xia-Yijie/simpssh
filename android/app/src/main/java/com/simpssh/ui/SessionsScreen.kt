@@ -1,7 +1,10 @@
 package com.simpssh.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,8 +24,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -184,18 +190,19 @@ private fun SessionBody(tab: TabState, manager: SessionManager) {
 @Composable
 private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (ByteArray) -> Unit) {
     val listState = rememberLazyListState()
-    // Instant scroll-to-bottom on any change to the rows (size or content of
-    // the last row), so soft-keyboard reflows still leave the prompt visible.
     LaunchedEffect(tab.rows.size, tab.rows.lastOrNull()?.text) {
         if (tab.rows.isNotEmpty()) {
             runCatching { listState.scrollToItem(tab.rows.lastIndex) }
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
-    ) {
+    val focusReq = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var ctrlPending by remember { mutableStateOf(false) }
+    var shadow by remember(tab.id) { mutableStateOf(TextFieldValue("")) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Status line
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -209,6 +216,18 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                 modifier = Modifier.padding(8.dp),
             )
         }
+
+        // Top toolbar: shortcut keys + keyboard trigger
+        TerminalToolbar(
+            ctrlPending = ctrlPending,
+            onToggleCtrl = { ctrlPending = !ctrlPending },
+            onSendBytes = onSendBytes,
+            onShowKeyboard = {
+                runCatching { focusReq.requestFocus() }
+                keyboard?.show()
+            },
+        )
+
         val palette = LocalPalette.current
         val termBg = palette.darkBackground
         val termFg = bestForeground(termBg)
@@ -228,7 +247,6 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                 manager.resizeTerminal(tab.id, cols.toUShort(), rows.toUShort())
             }
 
-            // Visible terminal grid
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(12.dp),
@@ -241,63 +259,136 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                     Text(withCursor, style = termStyle)
                 }
             }
+        }
 
-            // Invisible BasicTextField overlaying the terminal area. It owns
-            // the IME connection — tapping anywhere in the grid focuses it
-            // and brings up the soft keyboard. Renders nothing visible
-            // (matchParentSize + alpha 0). Each typed char is sent
-            // immediately via the delta logic in onValueChange.
-            //
-            // Caveat: this overlay also absorbs vertical drag gestures, so
-            // the LazyColumn behind it can't be scrolled by touch. That's
-            // acceptable while there's no scrollback (auto-scrolls to
-            // bottom anyway). When scrollback lands, route drag gestures
-            // around or under the field with pointerInput.
-            var shadow by remember(tab.id) { mutableStateOf(TextFieldValue("")) }
-            BasicTextField(
-                value = shadow,
-                onValueChange = { new ->
-                    val oldText = shadow.text
-                    val newText = new.text
-                    if (newText != oldText) {
-                        val common = oldText.commonPrefixWith(newText).length
-                        val toDelete = oldText.length - common
-                        val toAdd = newText.substring(common)
-                        if (toDelete > 0) onSendBytes(ByteArray(toDelete) { 0x7F })
-                        if (toAdd.isNotEmpty()) onSendBytes(toAdd.toByteArray())
+        // 0-dp BasicTextField living outside the terminal area: holds the
+        // IME connection. It only gets focus when the toolbar's keyboard
+        // button calls focusReq.requestFocus(); tapping the terminal grid
+        // doesn't bring up the keyboard any more.
+        BasicTextField(
+            value = shadow,
+            onValueChange = { new ->
+                val oldText = shadow.text
+                val newText = new.text
+                if (newText != oldText) {
+                    val common = oldText.commonPrefixWith(newText).length
+                    val toDelete = oldText.length - common
+                    val toAdd = newText.substring(common)
+                    if (toDelete > 0) onSendBytes(ByteArray(toDelete) { 0x7F })
+                    if (toAdd.isNotEmpty()) {
+                        if (ctrlPending && toAdd.length == 1) {
+                            val ch = toAdd[0]
+                            val byte: Byte? = when (ch) {
+                                in 'a'..'z' -> (ch - 'a' + 1).toByte()
+                                in 'A'..'Z' -> (ch - 'A' + 1).toByte()
+                                else -> null
+                            }
+                            if (byte != null) onSendBytes(byteArrayOf(byte))
+                            else onSendBytes(toAdd.toByteArray())
+                        } else {
+                            onSendBytes(toAdd.toByteArray())
+                        }
+                        ctrlPending = false
                     }
-                    shadow = new
+                }
+                shadow = new
+            },
+            modifier = Modifier
+                .size(0.dp)
+                .focusRequester(focusReq)
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    val bytes = specialKeyBytes(ev) ?: return@onPreviewKeyEvent false
+                    onSendBytes(bytes)
+                    true
                 },
-                modifier = Modifier
-                    .matchParentSize()
-                    .alpha(0f)
-                    .onPreviewKeyEvent { ev ->
-                        if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        val bytes = specialKeyBytes(ev) ?: return@onPreviewKeyEvent false
-                        onSendBytes(bytes)
-                        true
-                    },
-                singleLine = true,
-                cursorBrush = SolidColor(Color.Transparent),
-                textStyle = TextStyle(color = Color.Transparent),
-                keyboardOptions = KeyboardOptions(
-                    autoCorrect = false,
-                    capitalization = KeyboardCapitalization.None,
-                    keyboardType = KeyboardType.Ascii,
-                    imeAction = ImeAction.Send,
-                ),
-                keyboardActions = KeyboardActions(onSend = {
-                    onSendBytes(byteArrayOf(0x0D))
-                    shadow = TextFieldValue("")
-                }),
+            singleLine = true,
+            cursorBrush = SolidColor(Color.Transparent),
+            textStyle = TextStyle(color = Color.Transparent),
+            keyboardOptions = KeyboardOptions(
+                autoCorrect = false,
+                capitalization = KeyboardCapitalization.None,
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Send,
+            ),
+            keyboardActions = KeyboardActions(onSend = {
+                onSendBytes(byteArrayOf(0x0D))
+                shadow = TextFieldValue("")
+            }),
+        )
+    }
+}
+
+/// Termius-style shortcut bar above the terminal area. Single tap on any
+/// key sends the matching byte sequence; Ctrl is sticky (next typed letter
+/// becomes Ctrl+letter, then resets). The right-side ⌨ button is the only
+/// way to bring up the soft keyboard now — the terminal grid no longer
+/// auto-focuses the IME when tapped.
+@Composable
+private fun TerminalToolbar(
+    ctrlPending: Boolean,
+    onToggleCtrl: () -> Unit,
+    onSendBytes: (ByteArray) -> Unit,
+    onShowKeyboard: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToolKey("Esc")  { onSendBytes(byteArrayOf(0x1B)) }
+            ToolKey("Ctrl", selected = ctrlPending) { onToggleCtrl() }
+            ToolKey("Tab")  { onSendBytes(byteArrayOf(0x09)) }
+            ToolKey("↑")    { onSendBytes("\u001B[A".toByteArray()) }
+            ToolKey("↓")    { onSendBytes("\u001B[B".toByteArray()) }
+            ToolKey("←")    { onSendBytes("\u001B[D".toByteArray()) }
+            ToolKey("→")    { onSendBytes("\u001B[C".toByteArray()) }
+            ToolKey("|")    { onSendBytes(byteArrayOf(0x7C)) }
+            ToolKey("/")    { onSendBytes(byteArrayOf(0x2F)) }
+            ToolKey("-")    { onSendBytes(byteArrayOf(0x2D)) }
+            ToolKey("~")    { onSendBytes(byteArrayOf(0x7E)) }
+        }
+        Spacer(Modifier.width(6.dp))
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .clickable(onClick = onShowKeyboard),
+            contentAlignment = Alignment.Center,
+        ) {
+            NerdIcon(
+                NerdGlyphs.KEYBOARD, "调出键盘",
+                size = 18.dp,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }
-        Text(
-            "光标 (${tab.cursorRow},${tab.cursorCol})  ·  ${tab.cols.toInt()}×${tab.terminalRows.toInt()}",
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-        )
+    }
+}
+
+@Composable
+private fun ToolKey(label: String, selected: Boolean = false, onClick: () -> Unit) {
+    val bg = if (selected) MaterialTheme.colorScheme.primary
+             else MaterialTheme.colorScheme.surface
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary
+             else MaterialTheme.colorScheme.onSurface
+    Box(
+        modifier = Modifier
+            .heightIn(min = 32.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge.copy(color = fg))
     }
 }
 
