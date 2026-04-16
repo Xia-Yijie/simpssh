@@ -19,3 +19,13 @@ internal fun parentOf(p: String): String {
 
 internal fun formatError(action: String, err: Throwable?): String =
     "${action}失败: ${err?.message ?: "未知错误"}"
+
+internal suspend fun reportFilesError(
+    tab: TabState,
+    action: String,
+    err: Throwable?,
+) {
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+        tab.filesStatus = formatError(action, err)
+    }
+}

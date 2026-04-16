@@ -103,10 +103,16 @@ class SessionManager(private val scope: CoroutineScope) {
                         val cur = t.cursor()
                         val cursorStr = "(${cur.row},${cur.col})"
                         withContext(Dispatchers.Main) {
-                            tab.rows.clear()
-                            tab.rows.addAll(snap)
-                            // Skip the assignment when nothing changed so Compose
-                            // doesn't recompose the cursor display.
+                            // In-place diff: clear+addAll would force LazyColumn
+                            // to drop every row composition. Patch only the rows
+                            // that actually changed instead.
+                            while (tab.rows.size > snap.size) {
+                                tab.rows.removeAt(tab.rows.lastIndex)
+                            }
+                            snap.forEachIndexed { i, line ->
+                                if (i >= tab.rows.size) tab.rows.add(line)
+                                else if (tab.rows[i] != line) tab.rows[i] = line
+                            }
                             if (cursorStr != tab.cursor) tab.cursor = cursorStr
                         }
                     }
@@ -178,7 +184,7 @@ class SessionManager(private val scope: CoroutineScope) {
             val list = withContext(Dispatchers.IO) { s.listDir(path) }
             withContext(Dispatchers.Main) { tab.childrenByPath[path] = list }
         } catch (e: Exception) {
-            withContext(Dispatchers.Main) { tab.filesStatus = formatError("读取", e) }
+            reportFilesError(tab, "读取", e)
         }
     }
 

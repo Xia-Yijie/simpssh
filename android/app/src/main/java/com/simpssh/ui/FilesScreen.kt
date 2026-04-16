@@ -199,7 +199,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                         scope.launch {
                             val err = manager.delete(tab, row.entry)
                             if (err == null) manager.loadChildren(tab, parentOf(row.entry.path))
-                            else withContext(Dispatchers.Main) { tab.filesStatus = formatError("删除", err) }
+                            else reportFilesError(tab, "删除", err)
                         }
                     },
                 )
@@ -240,7 +240,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 scope.launch {
                     val err = manager.mkdir(tab, joinPath(parent, name))
                     if (err == null) manager.loadChildren(tab, parent)
-                    else withContext(Dispatchers.Main) { tab.filesStatus = formatError("创建", err) }
+                    else reportFilesError(tab, "创建", err)
                 }
             },
         )
@@ -262,7 +262,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 scope.launch {
                     val err = manager.rename(tab, entry.path, to)
                     if (err == null) manager.loadChildren(tab, parent)
-                    else withContext(Dispatchers.Main) { tab.filesStatus = formatError("重命名", err) }
+                    else reportFilesError(tab, "重命名", err)
                 }
             },
         )
