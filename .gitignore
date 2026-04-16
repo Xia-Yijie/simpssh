@@ -1,0 +1,12 @@
+/core/target
+/core/Cargo.lock
+.DS_Store
+*.swp
+
+# Gradle / Android (will appear once android/ subdir is added)
+.gradle/
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+*.iml

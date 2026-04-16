@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Terminal window body (rounded rectangle) -->
+    <path
+        android:pathData="M22,30 L86,30 A4,4 0 0 1 90,34 L90,78 A4,4 0 0 1 86,82 L22,82 A4,4 0 0 1 18,78 L18,34 A4,4 0 0 1 22,30 Z"
+        android:fillColor="#1A2535"/>
+
+    <!-- Title bar -->
+    <path
+        android:pathData="M22,30 L86,30 A4,4 0 0 1 90,34 L90,42 L18,42 L18,34 A4,4 0 0 1 22,30 Z"
+        android:fillColor="#2A3548"/>
+
+    <!-- Window control dots -->
+    <path
+        android:pathData="M27,36 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z"
+        android:fillColor="#FF5F56"/>
+    <path
+        android:pathData="M34,36 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z"
+        android:fillColor="#FFBD2E"/>
+    <path
+        android:pathData="M41,36 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z"
+        android:fillColor="#27C93F"/>
+
+    <!-- Prompt: ">" chevron -->
+    <path
+        android:pathData="M28,55 L36,62 L28,69"
+        android:strokeColor="#27C93F"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+
+    <!-- "simpssh" text bars (suggested glyph row) -->
+    <path
+        android:pathData="M42,57 L80,57 L80,60 L42,60 Z"
+        android:fillColor="#27C93F"/>
+    <path
+        android:pathData="M42,63 L70,63 L70,66 L42,66 Z"
+        android:fillColor="#27C93F"
+        android:fillAlpha="0.55"/>
+
+    <!-- Cursor block at end of second line -->
+    <path
+        android:pathData="M73,63 L78,63 L78,68 L73,68 Z"
+        android:fillColor="#27C93F"/>
+</vector>
