@@ -26,24 +26,16 @@
         android:pathData="M41,36 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z"
         android:fillColor="#27C93F"/>
 
-    <!-- "SIMPSSH" rendered as a 5x7 pixel-font path, plus a solid cursor block. -->
-    <!-- Cell layout: x=33→75, y=58→64. Each pixel = 1 viewport unit. -->
+    <!-- "SIMPSSH" centered inside the window, 5x7 pixel-font path. -->
     <path
         android:fillColor="#27C93F"
         android:pathData="
-            M34,58 h4 v1 h-4 Z   M33,59 h1 v2 h-1 Z   M34,61 h3 v1 h-3 Z   M37,62 h1 v2 h-1 Z   M33,64 h4 v1 h-4 Z
-            M39,58 h3 v1 h-3 Z   M40,59 h1 v5 h-1 Z   M39,64 h3 v1 h-3 Z
-            M43,58 h1 v7 h-1 Z   M47,58 h1 v7 h-1 Z   M44,59 h1 v1 h-1 Z   M46,59 h1 v1 h-1 Z   M45,60 h1 v1 h-1 Z
-            M49,58 h1 v7 h-1 Z   M50,58 h3 v1 h-3 Z   M53,59 h1 v2 h-1 Z   M50,61 h3 v1 h-3 Z
-            M56,58 h4 v1 h-4 Z   M55,59 h1 v2 h-1 Z   M56,61 h3 v1 h-3 Z   M58,62 h1 v2 h-1 Z   M55,64 h4 v1 h-4 Z
-            M62,58 h4 v1 h-4 Z   M61,59 h1 v2 h-1 Z   M62,61 h3 v1 h-3 Z   M64,62 h1 v2 h-1 Z   M61,64 h4 v1 h-4 Z
-            M67,58 h1 v7 h-1 Z   M71,58 h1 v7 h-1 Z   M68,61 h3 v1 h-3 Z
-            M73,58 h3 v7 h-3 Z
+            M36,58 h4 v1 h-4 Z   M35,59 h1 v2 h-1 Z   M36,61 h3 v1 h-3 Z   M39,62 h1 v2 h-1 Z   M35,64 h4 v1 h-4 Z
+            M41,58 h3 v1 h-3 Z   M42,59 h1 v5 h-1 Z   M41,64 h3 v1 h-3 Z
+            M45,58 h1 v7 h-1 Z   M49,58 h1 v7 h-1 Z   M46,59 h1 v1 h-1 Z   M48,59 h1 v1 h-1 Z   M47,60 h1 v1 h-1 Z
+            M51,58 h1 v7 h-1 Z   M52,58 h3 v1 h-3 Z   M55,59 h1 v2 h-1 Z   M52,61 h3 v1 h-3 Z
+            M58,58 h4 v1 h-4 Z   M57,59 h1 v2 h-1 Z   M58,61 h3 v1 h-3 Z   M61,62 h1 v2 h-1 Z   M57,64 h4 v1 h-4 Z
+            M64,58 h4 v1 h-4 Z   M63,59 h1 v2 h-1 Z   M64,61 h3 v1 h-3 Z   M67,62 h1 v2 h-1 Z   M63,64 h4 v1 h-4 Z
+            M69,58 h1 v7 h-1 Z   M73,58 h1 v7 h-1 Z   M70,61 h3 v1 h-3 Z
         "/>
-
-    <!-- Underscore prompt line below the text, suggesting "current line" -->
-    <path
-        android:pathData="M33,68 h32 v1 h-32 Z"
-        android:fillColor="#27C93F"
-        android:fillAlpha="0.4"/>
 </vector>
