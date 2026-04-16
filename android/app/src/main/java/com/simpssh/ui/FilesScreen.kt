@@ -62,7 +62,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.simpssh_core.DirEntry
 
-private data class TreeRow(val entry: DirEntry, val depth: Int)
+private sealed class TreeRow {
+    data class Entry(val entry: DirEntry, val depth: Int) : TreeRow()
+    /// Inserted when an expanded folder has no children we know of.
+    /// Lets the UI distinguish "(空)" from "尚未加载 / 失败" instead of
+    /// just rendering nothing.
+    data class Placeholder(val text: String, val depth: Int, val key: String) : TreeRow()
+}
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -164,45 +170,48 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
-            items(rows, key = { "${it.depth}@${it.entry.path}" }) { row ->
-                TreeRowView(
-                    entry = row.entry,
-                    depth = row.depth,
-                    isExpanded = tab.expanded.contains(row.entry.path),
-                    onClick = {
-                        if (row.entry.isDir) {
-                            scope.launch { manager.toggleExpand(tab, row.entry.path) }
-                        } else {
-                            scope.launch {
-                                val bytes = manager.readFileBytes(tab, row.entry.path) ?: return@launch
-                                preview = row.entry.path to decodeText(bytes)
+            items(rows, key = { rowKey(it) }) { row ->
+                when (row) {
+                    is TreeRow.Placeholder -> PlaceholderRow(row.text, row.depth)
+                    is TreeRow.Entry -> TreeRowView(
+                        entry = row.entry,
+                        depth = row.depth,
+                        isExpanded = tab.expanded.contains(row.entry.path),
+                        onClick = {
+                            if (row.entry.isDir) {
+                                scope.launch { manager.toggleExpand(tab, row.entry.path) }
+                            } else {
+                                scope.launch {
+                                    val bytes = manager.readFileBytes(tab, row.entry.path) ?: return@launch
+                                    preview = row.entry.path to decodeText(bytes)
+                                }
                             }
-                        }
-                    },
-                    onDownload = if (!row.entry.isDir) {
-                        {
-                            pendingDownload = row.entry
-                            downloadLauncher.launch(row.entry.name)
-                        }
-                    } else null,
-                    onMkdirHere = if (row.entry.isDir) {
-                        { mkdirInDir = row.entry.path }
-                    } else null,
-                    onUploadHere = if (row.entry.isDir) {
-                        {
-                            pendingUploadDir = row.entry.path
-                            uploadLauncher.launch(arrayOf("*/*"))
-                        }
-                    } else null,
-                    onRename = { renameTarget = row.entry },
-                    onDelete = {
-                        scope.launch {
-                            val err = manager.delete(tab, row.entry)
-                            if (err == null) manager.loadChildren(tab, parentOf(row.entry.path))
-                            else reportFilesError(tab, "删除", err)
-                        }
-                    },
-                )
+                        },
+                        onDownload = if (!row.entry.isDir) {
+                            {
+                                pendingDownload = row.entry
+                                downloadLauncher.launch(row.entry.name)
+                            }
+                        } else null,
+                        onMkdirHere = if (row.entry.isDir) {
+                            { mkdirInDir = row.entry.path }
+                        } else null,
+                        onUploadHere = if (row.entry.isDir) {
+                            {
+                                pendingUploadDir = row.entry.path
+                                uploadLauncher.launch(arrayOf("*/*"))
+                            }
+                        } else null,
+                        onRename = { renameTarget = row.entry },
+                        onDelete = {
+                            scope.launch {
+                                val err = manager.delete(tab, row.entry)
+                                if (err == null) manager.loadChildren(tab, parentOf(row.entry.path))
+                                else reportFilesError(tab, "删除", err)
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -281,6 +290,29 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 if (p.isBlank()) return@TextInputDialog
                 scope.launch { manager.setRoot(tab, p) }
             },
+        )
+    }
+}
+
+private fun rowKey(row: TreeRow): String = when (row) {
+    is TreeRow.Entry -> "${row.depth}@${row.entry.path}"
+    is TreeRow.Placeholder -> row.key
+}
+
+@Composable
+private fun PlaceholderRow(text: String, depth: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (8 + depth * TREE_INDENT_DP).dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Spacer(Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )
     }
 }
@@ -408,12 +440,18 @@ private fun TextInputDialog(
 }
 
 private fun flattenTree(tab: TabState, path: String, depth: Int): List<TreeRow> {
-    val children = tab.childrenByPath[path] ?: return emptyList()
+    val children = tab.childrenByPath[path]
+    if (children == null) return emptyList()  // root not loaded yet — caller renders nothing here
     val out = mutableListOf<TreeRow>()
     for (c in children) {
-        out.add(TreeRow(c, depth))
+        out.add(TreeRow.Entry(c, depth))
         if (c.isDir && tab.expanded.contains(c.path)) {
-            out.addAll(flattenTree(tab, c.path, depth + 1))
+            val nested = tab.childrenByPath[c.path]
+            when {
+                nested == null -> out.add(TreeRow.Placeholder("(尚未加载)", depth + 1, "ph-load:${c.path}"))
+                nested.isEmpty() -> out.add(TreeRow.Placeholder("(空目录)", depth + 1, "ph-empty:${c.path}"))
+                else -> out.addAll(flattenTree(tab, c.path, depth + 1))
+            }
         }
     }
     return out
