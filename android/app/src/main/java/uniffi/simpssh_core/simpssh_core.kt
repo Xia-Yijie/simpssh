@@ -1007,16 +1007,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_simpssh_core_checksum_method_sftpsession_disconnect() != 46197.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_home_dir() != 53831.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_home_dir() != 28518.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_list_dir() != 63592.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_list_dir() != 39428.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_method_sftpsession_mkdir() != 49893.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_read_file() != 37530.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_read_file() != 34619.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_method_sftpsession_rename() != 33011.toShort()) {
@@ -1025,7 +1025,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_simpssh_core_checksum_method_sftpsession_stat() != 54166.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_write_file() != 61197.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_sftpsession_write_file() != 39560.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_method_sshsession_disconnect() != 58543.toShort()) {
@@ -1049,7 +1049,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot() != 21078.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_constructor_sftpsession_connect_password() != 54286.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_constructor_sftpsession_connect_password() != 54200.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_constructor_sshsession_connect_password() != 57782.toShort()) {
@@ -1443,32 +1443,18 @@ public interface SftpSessionInterface {
     
     fun `disconnect`()
     
-    /**
-     * Resolves the user's home directory by asking SFTP for the canonical
-     * representation of ".".
-     */
     fun `homeDir`(): kotlin.String
     
-    /**
-     * List directory entries. Implicit "." / ".." are not included.
-     */
     fun `listDir`(`path`: kotlin.String): List<DirEntry>
     
     fun `mkdir`(`path`: kotlin.String)
     
-    /**
-     * Read a slice of a file. Use `offset=0, len=cap` for "whole file up to cap".
-     * Caller decides the cap to avoid unbounded reads.
-     */
     fun `readFile`(`path`: kotlin.String, `offset`: kotlin.ULong, `len`: kotlin.UInt): kotlin.ByteArray
     
     fun `rename`(`from`: kotlin.String, `to`: kotlin.String)
     
     fun `stat`(`path`: kotlin.String): DirEntry
     
-    /**
-     * Overwrite (or create) a remote file with `bytes`.
-     */
     fun `writeFile`(`path`: kotlin.String, `bytes`: kotlin.ByteArray)
     
     companion object
@@ -1591,10 +1577,6 @@ open class SftpSession: Disposable, AutoCloseable, SftpSessionInterface {
     
 
     
-    /**
-     * Resolves the user's home directory by asking SFTP for the canonical
-     * representation of ".".
-     */
     @Throws(SftpException::class)override fun `homeDir`(): kotlin.String {
             return FfiConverterString.lift(
     callWithPointer {
@@ -1608,9 +1590,6 @@ open class SftpSession: Disposable, AutoCloseable, SftpSessionInterface {
     
 
     
-    /**
-     * List directory entries. Implicit "." / ".." are not included.
-     */
     @Throws(SftpException::class)override fun `listDir`(`path`: kotlin.String): List<DirEntry> {
             return FfiConverterSequenceTypeDirEntry.lift(
     callWithPointer {
@@ -1636,10 +1615,6 @@ open class SftpSession: Disposable, AutoCloseable, SftpSessionInterface {
     
 
     
-    /**
-     * Read a slice of a file. Use `offset=0, len=cap` for "whole file up to cap".
-     * Caller decides the cap to avoid unbounded reads.
-     */
     @Throws(SftpException::class)override fun `readFile`(`path`: kotlin.String, `offset`: kotlin.ULong, `len`: kotlin.UInt): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     callWithPointer {
@@ -1678,9 +1653,6 @@ open class SftpSession: Disposable, AutoCloseable, SftpSessionInterface {
     
 
     
-    /**
-     * Overwrite (or create) a remote file with `bytes`.
-     */
     @Throws(SftpException::class)override fun `writeFile`(`path`: kotlin.String, `bytes`: kotlin.ByteArray)
         = 
     callWithPointer {
@@ -1697,9 +1669,6 @@ open class SftpSession: Disposable, AutoCloseable, SftpSessionInterface {
     
     companion object {
         
-    /**
-     * Open an SFTP subsystem on a fresh SSH connection.
-     */
     @Throws(SftpException::class) fun `connectPassword`(`host`: kotlin.String, `port`: kotlin.UShort, `user`: kotlin.String, `password`: kotlin.String): SftpSession {
             return FfiConverterTypeSftpSession.lift(
     uniffiRustCallWithError(SftpException) { _status ->
@@ -2368,15 +2337,9 @@ data class DirEntry (
     var `name`: kotlin.String, 
     var `path`: kotlin.String, 
     var `size`: kotlin.ULong, 
-    /**
-     * Seconds since unix epoch, 0 if unknown.
-     */
     var `mtime`: kotlin.ULong, 
     var `isDir`: kotlin.Boolean, 
     var `isLink`: kotlin.Boolean, 
-    /**
-     * Octal permission bits (e.g. 0o644). 0 if unknown.
-     */
     var `mode`: kotlin.UInt
 ) {
     

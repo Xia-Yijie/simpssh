@@ -27,29 +27,29 @@
         android:fillColor="#27C93F"/>
 
     <!-- "> SIMPSSH" rendered as a 7x8 pixel-font path (chevron is 5x8). -->
-    <!-- Wider gap (3 cols) between > and the word for breathing room. -->
+    <!-- ~5-cell gap between > and the word so the space is visible at icon size. -->
     <path
         android:fillColor="#27C93F"
         android:pathData="
             M26,60 h2 v1 h-2 Z   M27,61 h2 v1 h-2 Z   M28,62 h2 v1 h-2 Z   M29,63 h2 v1 h-2 Z
             M28,64 h2 v1 h-2 Z   M27,65 h2 v1 h-2 Z   M26,66 h2 v1 h-2 Z
 
-            M35,59 h5 v1 h-5 Z   M34,60 h1 v2 h-1 Z   M40,60 h1 v1 h-1 Z   M35,62 h5 v1 h-5 Z
-            M40,63 h1 v2 h-1 Z   M34,65 h1 v1 h-1 Z   M40,65 h1 v1 h-1 Z   M35,66 h5 v1 h-5 Z
+            M37,59 h5 v1 h-5 Z   M36,60 h1 v2 h-1 Z   M42,60 h1 v1 h-1 Z   M37,62 h5 v1 h-5 Z
+            M42,63 h1 v2 h-1 Z   M36,65 h1 v1 h-1 Z   M42,65 h1 v1 h-1 Z   M37,66 h5 v1 h-5 Z
 
-            M42,59 h3 v1 h-3 Z   M43,60 h1 v6 h-1 Z   M42,66 h3 v1 h-3 Z
+            M44,59 h3 v1 h-3 Z   M45,60 h1 v6 h-1 Z   M44,66 h3 v1 h-3 Z
 
-            M46,59 h1 v8 h-1 Z   M52,59 h1 v8 h-1 Z   M47,60 h1 v1 h-1 Z   M51,60 h1 v1 h-1 Z
-            M48,61 h1 v1 h-1 Z   M50,61 h1 v1 h-1 Z   M49,62 h1 v1 h-1 Z
+            M48,59 h1 v8 h-1 Z   M54,59 h1 v8 h-1 Z   M49,60 h1 v1 h-1 Z   M53,60 h1 v1 h-1 Z
+            M50,61 h1 v1 h-1 Z   M52,61 h1 v1 h-1 Z   M51,62 h1 v1 h-1 Z
 
-            M54,59 h1 v8 h-1 Z   M55,59 h5 v1 h-5 Z   M60,60 h1 v2 h-1 Z   M55,62 h5 v1 h-5 Z
+            M56,59 h1 v8 h-1 Z   M57,59 h5 v1 h-5 Z   M62,60 h1 v2 h-1 Z   M57,62 h5 v1 h-5 Z
 
-            M63,59 h5 v1 h-5 Z   M62,60 h1 v2 h-1 Z   M68,60 h1 v1 h-1 Z   M63,62 h5 v1 h-5 Z
-            M68,63 h1 v2 h-1 Z   M62,65 h1 v1 h-1 Z   M68,65 h1 v1 h-1 Z   M63,66 h5 v1 h-5 Z
+            M65,59 h5 v1 h-5 Z   M64,60 h1 v2 h-1 Z   M70,60 h1 v1 h-1 Z   M65,62 h5 v1 h-5 Z
+            M70,63 h1 v2 h-1 Z   M64,65 h1 v1 h-1 Z   M70,65 h1 v1 h-1 Z   M65,66 h5 v1 h-5 Z
 
-            M71,59 h5 v1 h-5 Z   M70,60 h1 v2 h-1 Z   M76,60 h1 v1 h-1 Z   M71,62 h5 v1 h-5 Z
-            M76,63 h1 v2 h-1 Z   M70,65 h1 v1 h-1 Z   M76,65 h1 v1 h-1 Z   M71,66 h5 v1 h-5 Z
+            M73,59 h5 v1 h-5 Z   M72,60 h1 v2 h-1 Z   M78,60 h1 v1 h-1 Z   M73,62 h5 v1 h-5 Z
+            M78,63 h1 v2 h-1 Z   M72,65 h1 v1 h-1 Z   M78,65 h1 v1 h-1 Z   M73,66 h5 v1 h-5 Z
 
-            M78,59 h1 v8 h-1 Z   M84,59 h1 v8 h-1 Z   M79,62 h5 v1 h-5 Z
+            M80,59 h1 v8 h-1 Z   M86,59 h1 v8 h-1 Z   M81,62 h5 v1 h-5 Z
         "/>
 </vector>
