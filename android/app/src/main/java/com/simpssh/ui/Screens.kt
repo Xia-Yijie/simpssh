@@ -51,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -99,7 +100,6 @@ fun ServerListScreen(
             // and the column doesn't stretch beyond what 添加服务器 needs.
             Column(
                 modifier = Modifier.width(IntrinsicSize.Max),
-                horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 AlignedFab(
@@ -162,8 +162,8 @@ private fun AlignedFab(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    containerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceVariant,
-    contentColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+    contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     FloatingActionButton(
         onClick = onClick,
