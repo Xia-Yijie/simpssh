@@ -15,22 +15,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.simpssh.data.PreferencesRepository
 import com.simpssh.data.ServerRepository
 
 private sealed class Screen {
     data object List : Screen()
     data class Edit(val id: String?) : Screen()
     data object Sessions : Screen()
+    data object Settings : Screen()
 }
 
 @Composable
 fun App() {
     val ctx = LocalContext.current
     val repo = remember { ServerRepository(ctx) }
+    val prefs = remember { PreferencesRepository(ctx) }
     val scope = rememberCoroutineScope()
     val sessions = remember { SessionManager(scope) }
     var servers by remember { mutableStateOf(repo.load()) }
     var screen by remember { mutableStateOf<Screen>(Screen.List) }
+    var themeName by remember { mutableStateOf(prefs.themeName) }
+    val palette = paletteByName(themeName)
 
     fun reload() { servers = repo.load() }
 
@@ -38,49 +43,60 @@ fun App() {
         onDispose { sessions.disposeAll() }
     }
 
-    AnimatedContent(
-        targetState = screen,
-        transitionSpec = {
-            (slideInHorizontally(tween(220)) { it / 4 } + fadeIn(tween(220))) togetherWith
-                (slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
-        },
-        label = "nav",
-    ) { current ->
-        when (current) {
-            is Screen.List -> ServerListScreen(
-                servers = servers,
-                openSessionCount = sessions.tabs.size,
-                onAdd = { screen = Screen.Edit(id = null) },
-                onEdit = { screen = Screen.Edit(it.id) },
-                onConnect = { server, script ->
-                    sessions.open(server, script)
-                    screen = Screen.Sessions
-                },
-                onShowSessions = { screen = Screen.Sessions },
-            )
-            is Screen.Edit -> {
-                val s = current.id?.let { id -> servers.firstOrNull { it.id == id } }
-                ServerEditScreen(
-                    initial = s,
-                    onCancel = { screen = Screen.List },
-                    onSave = { saved ->
-                        repo.upsert(saved)
-                        reload()
-                        screen = Screen.List
+    SimpsshTheme(palette = palette) {
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = {
+                (slideInHorizontally(tween(220)) { it / 4 } + fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(tween(220)) { -it / 4 } + fadeOut(tween(220)))
+            },
+            label = "nav",
+        ) { current ->
+            when (current) {
+                is Screen.List -> ServerListScreen(
+                    servers = servers,
+                    openSessionCount = sessions.tabs.size,
+                    onAdd = { screen = Screen.Edit(id = null) },
+                    onEdit = { screen = Screen.Edit(it.id) },
+                    onConnect = { server, script ->
+                        sessions.open(server, script)
+                        screen = Screen.Sessions
                     },
-                    onDelete = if (s != null) {
-                        {
-                            repo.delete(s.id)
+                    onShowSessions = { screen = Screen.Sessions },
+                    onShowSettings = { screen = Screen.Settings },
+                )
+                is Screen.Edit -> {
+                    val s = current.id?.let { id -> servers.firstOrNull { it.id == id } }
+                    ServerEditScreen(
+                        initial = s,
+                        onCancel = { screen = Screen.List },
+                        onSave = { saved ->
+                            repo.upsert(saved)
                             reload()
                             screen = Screen.List
-                        }
-                    } else null,
+                        },
+                        onDelete = if (s != null) {
+                            {
+                                repo.delete(s.id)
+                                reload()
+                                screen = Screen.List
+                            }
+                        } else null,
+                    )
+                }
+                is Screen.Sessions -> SessionsScreen(
+                    manager = sessions,
+                    onHome = { screen = Screen.List },
+                )
+                is Screen.Settings -> SettingsScreen(
+                    currentTheme = themeName,
+                    onThemeChange = {
+                        prefs.themeName = it
+                        themeName = it
+                    },
+                    onBack = { screen = Screen.List },
                 )
             }
-            is Screen.Sessions -> SessionsScreen(
-                manager = sessions,
-                onHome = { screen = Screen.List },
-            )
         }
     }
 }

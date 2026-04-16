@@ -72,6 +72,7 @@ fun ServerListScreen(
     onEdit: (Server) -> Unit,
     onConnect: (server: Server, script: InitScript?) -> Unit,
     onShowSessions: () -> Unit,
+    onShowSettings: () -> Unit,
 ) {
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     var showGuide by remember { mutableStateOf(false) }
@@ -106,6 +107,14 @@ fun ServerListScreen(
                     onClick = { showGuide = true },
                     icon = { NerdIcon(NerdGlyphs.HELP, null, size = 20.dp) },
                     text = { Text("操作指南") },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.widthIn(min = 180.dp),
+                )
+                ExtendedFloatingActionButton(
+                    onClick = onShowSettings,
+                    icon = { NerdIcon(NerdGlyphs.COG, null, size = 20.dp) },
+                    text = { Text("设置") },
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.widthIn(min = 180.dp),

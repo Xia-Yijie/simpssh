@@ -39,7 +39,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SegmentedButton
@@ -72,19 +71,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uniffi.simpssh_core.StyledRow
 
-private val SessionsDarkScheme = darkColorScheme(
-    background       = Color(0xFF0B0E12),
-    surface          = Color(0xFF12161C),
-    surfaceVariant   = Color(0xFF1A2027),
-    onSurface        = Color(0xFFE6E8EB),
-    onSurfaceVariant = Color(0xFFB7BEC9),
-    primary          = Color(0xFF8AB4F8),
-    onPrimary        = Color(0xFF0B1A33),
-    primaryContainer = Color(0xFF1F3358),
-    onPrimaryContainer = Color(0xFFD7E3FF),
-    outline          = Color(0xFF40474F),
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
@@ -95,7 +81,9 @@ fun SessionsScreen(manager: SessionManager, onHome: () -> Unit) {
         if (manager.tabs.isEmpty()) onHome()
     }
 
-    MaterialTheme(colorScheme = SessionsDarkScheme) {
+    // Dark variant of the user-selected palette so the session view matches
+    // the home screen primary colour.
+    MaterialTheme(colorScheme = darkSchemeFor(LocalPalette.current)) {
     Scaffold(
         topBar = {
             Column {

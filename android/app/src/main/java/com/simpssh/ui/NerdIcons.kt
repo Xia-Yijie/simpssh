@@ -100,6 +100,7 @@ object NerdGlyphs {
     const val HELP           = "\uF059"   // fa-question-circle
     const val INFO           = "\uF05A"   // fa-info-circle
     const val CODE           = "\uF121"   // fa-code
+    const val COG            = "\uF013"   // fa-cog (settings gear)
 }
 
 /// Map a filename to a Nerd Font glyph based on its extension. Falls back to
