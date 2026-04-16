@@ -301,18 +301,16 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
     }
 }
 
-// Default terminal background — matches the DEFAULT_BG in Rust so cells with
-// no explicit background blend with the surrounding container.
-internal val TerminalBackground = Color(0xFF000000)
-
 /// Shared text style for any monospace terminal-like rendering (the real
 /// shell view, the file-preview dialog, and the per-theme preview). Keep
 /// these in sync so the preview really looks like the terminal.
 internal val TerminalTextStyle: TextStyle =
     TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
 
-// Rust DEFAULT_FG / DEFAULT_BG (from terminal.rs). Cells whose fg/bg equal
-// these are treated as "use the theme colour" instead of the literal value.
+// Rust DEFAULT_FG / DEFAULT_BG, must match `core/src/terminal.rs`
+// (DEFAULT_FG = 0xD3D7CF, DEFAULT_BG = 0x000000). Cells whose fg/bg equal
+// these are treated as "use the theme colour" instead of the literal value
+// — keep both ends in sync if you ever change the Rust defaults.
 private const val RUST_DEFAULT_FG = 0xD3D7CF
 private const val RUST_DEFAULT_BG = 0x000000
 

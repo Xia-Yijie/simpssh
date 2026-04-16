@@ -28,10 +28,13 @@ data class ThemePalette(
 )
 
 val BuiltInPalettes: List<ThemePalette> = listOf(
+    // ---- Dark ----
     ThemePalette(
-        name = "default", displayName = "默认蓝",
-        primary = Color(0xFF005FBF), onPrimary = Color.White,
-        primaryContainer = Color(0xFFD7E3FF), onPrimaryContainer = Color(0xFF001A41),
+        name = "default", displayName = "普鲁士蓝",
+        primary = Color(0xFF4A8FD9), onPrimary = Color.White,
+        primaryContainer = Color(0xFF1A3A66), onPrimaryContainer = Color(0xFFD7E3FF),
+        darkBackground = Color(0xFF0B1A33), darkSurface = Color(0xFF11244A),
+        darkSurfaceVariant = Color(0xFF1A3661),
     ),
     ThemePalette(
         name = "dracula", displayName = "德古拉紫",
@@ -41,48 +44,13 @@ val BuiltInPalettes: List<ThemePalette> = listOf(
         darkSurfaceVariant = Color(0xFF44475A),
     ),
     ThemePalette(
-        name = "tokyonight", displayName = "东京之夜",
-        primary = Color(0xFF7AA2F7), onPrimary = Color(0xFF1A1B26),
-        primaryContainer = Color(0xFF24283B), onPrimaryContainer = Color(0xFFC0CAF5),
-        darkBackground = Color(0xFF1A1B26), darkSurface = Color(0xFF24283B),
-        darkSurfaceVariant = Color(0xFF2F334D),
-    ),
-    ThemePalette(
-        name = "nord", displayName = "北欧霜",
-        primary = Color(0xFF88C0D0), onPrimary = Color(0xFF2E3440),
-        primaryContainer = Color(0xFF4C566A), onPrimaryContainer = Color(0xFFECEFF4),
-        darkBackground = Color(0xFF2E3440), darkSurface = Color(0xFF3B4252),
-        darkSurfaceVariant = Color(0xFF434C5E),
-    ),
-    ThemePalette(
-        name = "gruvbox", displayName = "复古暖橙",
-        primary = Color(0xFFFE8019), onPrimary = Color(0xFF282828),
-        primaryContainer = Color(0xFF504945), onPrimaryContainer = Color(0xFFEBDBB2),
-        darkBackground = Color(0xFF282828), darkSurface = Color(0xFF3C3836),
-        darkSurfaceVariant = Color(0xFF504945),
-    ),
-    ThemePalette(
-        name = "onedark", displayName = "原子暗",
-        primary = Color(0xFF61AFEF), onPrimary = Color(0xFF21252B),
-        primaryContainer = Color(0xFF3E4451), onPrimaryContainer = Color(0xFFABB2BF),
-        darkBackground = Color(0xFF282C34), darkSurface = Color(0xFF21252B),
-        darkSurfaceVariant = Color(0xFF3E4451),
-    ),
-    ThemePalette(
         name = "monokai", displayName = "莫诺凯绿",
         primary = Color(0xFFA6E22E), onPrimary = Color(0xFF272822),
         primaryContainer = Color(0xFF49483E), onPrimaryContainer = Color(0xFFF8F8F2),
         darkBackground = Color(0xFF272822), darkSurface = Color(0xFF1E1F1C),
         darkSurfaceVariant = Color(0xFF49483E),
     ),
-    ThemePalette(
-        name = "solarized", displayName = "日冕暖黄",
-        primary = Color(0xFFB58900), onPrimary = Color(0xFF002B36),
-        primaryContainer = Color(0xFF073642), onPrimaryContainer = Color(0xFFEEE8D5),
-        darkBackground = Color(0xFF002B36), darkSurface = Color(0xFF073642),
-        darkSurfaceVariant = Color(0xFF586E75),
-    ),
-    // ---- Light variants — used when palette.darkBackground is actually light. ----
+    // ---- Light ----
     ThemePalette(
         name = "morninglight", displayName = "晨曦白",
         primary = Color(0xFF0969DA), onPrimary = Color.White,
@@ -92,7 +60,9 @@ val BuiltInPalettes: List<ThemePalette> = listOf(
     ),
     ThemePalette(
         name = "warmcream", displayName = "米色暖光",
-        primary = Color(0xFF859900), onPrimary = Color(0xFFFDF6E3),
+        // Olive primary needs dark text — light cream onPrimary lands in
+        // WCAG AA borderline at small sizes.
+        primary = Color(0xFF859900), onPrimary = Color(0xFF002B36),
         primaryContainer = Color(0xFFEEE8D5), onPrimaryContainer = Color(0xFF586E75),
         darkBackground = Color(0xFFFDF6E3), darkSurface = Color(0xFFF7F0D8),
         darkSurfaceVariant = Color(0xFFEEE8D5),
