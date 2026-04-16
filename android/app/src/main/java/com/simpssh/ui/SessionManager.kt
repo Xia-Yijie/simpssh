@@ -46,6 +46,9 @@ class TabState(
     // ---- Files (lazy) -------------------------------------------------------
     var filesStatus by mutableStateOf("未连接")
     var sftp: SftpSession? = null
+    /// Guards against a second SFTP handshake while one is already in flight.
+    /// Avoids relying on a string compare against `filesStatus`.
+    var filesConnecting: Boolean = false
     var rootPath by mutableStateOf("/")
     val childrenByPath: SnapshotStateMap<String, List<DirEntry>> = mutableStateMapOf()
     val expanded: SnapshotStateList<String> = mutableStateListOf()
@@ -124,8 +127,8 @@ class SessionManager(private val scope: CoroutineScope) {
     /// First-time switch to Files view triggers the SFTP handshake. Re-entry
     /// while already connected is a no-op.
     fun ensureFilesConnected(tab: TabState) {
-        if (tab.sftp != null) return
-        if (tab.filesStatus == "连接中…") return
+        if (tab.sftp != null || tab.filesConnecting) return
+        tab.filesConnecting = true
         tab.filesStatus = "连接中…"
         scope.launch(Dispatchers.IO) { connectFiles(tab) }
     }
@@ -164,11 +167,10 @@ class SessionManager(private val scope: CoroutineScope) {
             }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) { tab.filesStatus = "连接失败: ${e.message}" }
+        } finally {
+            tab.filesConnecting = false
         }
     }
-
-    private fun joinPath(base: String, name: String): String =
-        if (base.endsWith('/')) "$base$name" else "$base/$name"
 
     suspend fun loadChildren(tab: TabState, path: String) {
         val s = tab.sftp ?: return
@@ -205,34 +207,23 @@ class SessionManager(private val scope: CoroutineScope) {
         }
     }
 
-    suspend fun writeFileBytes(tab: TabState, path: String, bytes: ByteArray): Throwable? {
-        val s = tab.sftp ?: return IllegalStateException("not connected")
-        return withContext(Dispatchers.IO) {
-            runCatching { s.writeFile(path, bytes) }.exceptionOrNull()
-        }
-    }
+    suspend fun writeFileBytes(tab: TabState, path: String, bytes: ByteArray): Throwable? =
+        sftpOp(tab) { it.writeFile(path, bytes) }
 
-    suspend fun mkdir(tab: TabState, path: String): Throwable? {
-        val s = tab.sftp ?: return IllegalStateException("not connected")
-        return withContext(Dispatchers.IO) {
-            runCatching { s.mkdir(path) }.exceptionOrNull()
-        }
-    }
+    suspend fun mkdir(tab: TabState, path: String): Throwable? =
+        sftpOp(tab) { it.mkdir(path) }
 
-    suspend fun rename(tab: TabState, from: String, to: String): Throwable? {
-        val s = tab.sftp ?: return IllegalStateException("not connected")
-        return withContext(Dispatchers.IO) {
-            runCatching { s.rename(from, to) }.exceptionOrNull()
-        }
-    }
+    suspend fun rename(tab: TabState, from: String, to: String): Throwable? =
+        sftpOp(tab) { it.rename(from, to) }
 
-    suspend fun delete(tab: TabState, entry: DirEntry): Throwable? {
+    suspend fun delete(tab: TabState, entry: DirEntry): Throwable? =
+        sftpOp(tab) { if (entry.isDir) it.deleteDir(entry.path) else it.deleteFile(entry.path) }
+
+    /// Run a block on IO with the tab's SFTP session, returning a non-null
+    /// `Throwable` only when the call failed (or no session was open).
+    private suspend inline fun sftpOp(tab: TabState, crossinline block: (SftpSession) -> Unit): Throwable? {
         val s = tab.sftp ?: return IllegalStateException("not connected")
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                if (entry.isDir) s.deleteDir(entry.path) else s.deleteFile(entry.path)
-            }.exceptionOrNull()
-        }
+        return withContext(Dispatchers.IO) { runCatching { block(s) }.exceptionOrNull() }
     }
 
     // ---- Tab plumbing -------------------------------------------------------

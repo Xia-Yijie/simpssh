@@ -113,12 +113,11 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
         }
     }
 
-    // Recompute the visible tree whenever expansion or any cached dir changes.
-    val rows = remember(
-        tab.rootPath,
-        tab.expanded.toList(),
-        tab.childrenByPath.toMap(),
-    ) { flattenTree(tab, tab.rootPath, depth = 0) }
+    // Plain call; flattenTree reads SnapshotState (childrenByPath, expanded),
+    // so Compose recomposes us when those change. Wrapping in remember{} with
+    // .toList()/.toMap() keys would allocate fresh keys every recompose and
+    // defeat the memoization, so we rely on the snapshot tracking instead.
+    val rows = flattenTree(tab, tab.rootPath, depth = 0)
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Header
@@ -419,16 +418,6 @@ private fun flattenTree(tab: TabState, path: String, depth: Int): List<TreeRow> 
     }
     return out
 }
-
-private fun parentOf(p: String): String {
-    if (p == "/") return "/"
-    val trimmed = p.trimEnd('/')
-    val cut = trimmed.lastIndexOf('/')
-    return if (cut <= 0) "/" else trimmed.substring(0, cut)
-}
-
-private fun joinPath(base: String, name: String): String =
-    if (base.endsWith('/')) "$base$name" else "$base/$name"
 
 private fun decodeText(bytes: ByteArray): String {
     return try {
