@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +30,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -91,32 +93,27 @@ fun ServerListScreen(
                 },
             )
         },
-        bottomBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+        floatingActionButton = {
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                BottomAction(
+                AlignedFab(
                     glyph = NerdGlyphs.PLUS,
                     label = "添加服务器",
                     onClick = onAdd,
-                    modifier = Modifier.weight(1f),
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
-                BottomAction(
+                AlignedFab(
                     glyph = NerdGlyphs.HELP,
                     label = "操作指南",
                     onClick = { showGuide = true },
-                    modifier = Modifier.weight(1f),
                 )
-                BottomAction(
+                AlignedFab(
                     glyph = NerdGlyphs.COG,
                     label = "设置",
                     onClick = onShowSettings,
-                    modifier = Modifier.weight(1f),
                 )
             }
         },
@@ -149,31 +146,31 @@ fun ServerListScreen(
     if (showGuide) GuideDialog(onDismiss = { showGuide = false })
 }
 
-/// One of the three bottom-bar action buttons on the home screen.
-/// Width is driven by the parent Row's weight modifier (each gets 1/3 of
-/// the screen). Icon + label are centered together inside the chip so all
-/// three line up symmetrically across the bottom edge.
+/// FAB with widthIn(min = 200dp) and a start-aligned (icon, label) Row so
+/// multiple FABs stacked vertically share the same icon X column regardless
+/// of label length. Long labels are allowed to grow the FAB wider.
 @Composable
-private fun BottomAction(
+private fun AlignedFab(
     glyph: String,
     label: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surfaceVariant,
     contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
-    FilledTonalButton(
+    FloatingActionButton(
         onClick = onClick,
-        modifier = modifier.height(56.dp),
-        colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = containerColor,
-            contentColor = contentColor,
-        ),
-        contentPadding = PaddingValues(horizontal = 12.dp),
+        containerColor = containerColor,
+        contentColor = contentColor,
+        modifier = Modifier.widthIn(min = 200.dp).height(56.dp),
     ) {
-        NerdIcon(glyph, null, size = 18.dp, tint = contentColor)
-        Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NerdIcon(glyph, null, size = 20.dp, tint = contentColor)
+            Spacer(Modifier.width(12.dp))
+            Text(label, style = MaterialTheme.typography.titleSmall)
+        }
     }
 }
 
