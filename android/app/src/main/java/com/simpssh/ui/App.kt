@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.platform.LocalContext
 import com.simpssh.data.PreferencesRepository
 import com.simpssh.data.ServerRepository
@@ -23,6 +24,7 @@ private sealed class Screen {
     data class Edit(val id: String?) : Screen()
     data object Sessions : Screen()
     data object Settings : Screen()
+    data class CustomPaletteEdit(val name: String?) : Screen()
 }
 
 @Composable
@@ -35,7 +37,8 @@ fun App() {
     var servers by remember { mutableStateOf(repo.load()) }
     var screen by remember { mutableStateOf<Screen>(Screen.List) }
     var themeName by remember { mutableStateOf(prefs.themeName) }
-    val palette = paletteByName(themeName)
+    val customPalettes = remember { prefs.loadCustomPalettes().toMutableStateList() }
+    val palette = resolvePalette(themeName, customPalettes)
 
     fun reload() { servers = repo.load() }
 
@@ -90,12 +93,39 @@ fun App() {
                 )
                 is Screen.Settings -> SettingsScreen(
                     currentTheme = themeName,
+                    customPalettes = customPalettes,
                     onThemeChange = {
                         prefs.themeName = it
                         themeName = it
                     },
+                    onAddCustom = { screen = Screen.CustomPaletteEdit(name = null) },
+                    onEditCustom = { screen = Screen.CustomPaletteEdit(name = it.name) },
+                    onDeleteCustom = { p ->
+                        customPalettes.removeAll { it.name == p.name }
+                        prefs.saveCustomPalettes(customPalettes.toList())
+                        if (themeName == p.name) {
+                            themeName = "default"
+                            prefs.themeName = "default"
+                        }
+                    },
                     onBack = { screen = Screen.List },
                 )
+                is Screen.CustomPaletteEdit -> {
+                    val initial = current.name?.let { id -> customPalettes.firstOrNull { it.name == id } }
+                    CustomPaletteEditScreen(
+                        initial = initial,
+                        onCancel = { screen = Screen.Settings },
+                        onSave = { saved ->
+                            val idx = customPalettes.indexOfFirst { it.name == saved.name }
+                            if (idx >= 0) customPalettes[idx] = saved else customPalettes.add(saved)
+                            prefs.saveCustomPalettes(customPalettes.toList())
+                            // Auto-select the newly saved palette
+                            themeName = saved.name
+                            prefs.themeName = saved.name
+                            screen = Screen.Settings
+                        },
+                    )
+                }
             }
         }
     }
