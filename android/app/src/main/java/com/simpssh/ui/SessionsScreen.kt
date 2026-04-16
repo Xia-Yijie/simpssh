@@ -217,17 +217,6 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
             )
         }
 
-        // Top toolbar: shortcut keys + keyboard trigger
-        TerminalToolbar(
-            ctrlPending = ctrlPending,
-            onToggleCtrl = { ctrlPending = !ctrlPending },
-            onSendBytes = onSendBytes,
-            onShowKeyboard = {
-                runCatching { focusReq.requestFocus() }
-                keyboard?.show()
-            },
-        )
-
         val palette = LocalPalette.current
         val termBg = palette.darkBackground
         val termFg = bestForeground(termBg)
@@ -261,10 +250,23 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
             }
         }
 
-        // 0-dp BasicTextField living outside the terminal area: holds the
-        // IME connection. It only gets focus when the toolbar's keyboard
-        // button calls focusReq.requestFocus(); tapping the terminal grid
-        // doesn't bring up the keyboard any more.
+        // Bottom toolbar: shortcut keys + keyboard trigger
+        TerminalToolbar(
+            ctrlPending = ctrlPending,
+            onToggleCtrl = { ctrlPending = !ctrlPending },
+            onSendBytes = onSendBytes,
+            onShowKeyboard = {
+                runCatching { focusReq.requestFocus() }
+                keyboard?.show()
+            },
+        )
+
+        // Tiny invisible BasicTextField that owns the IME connection. We
+        // give it 1.dp + alpha 0 (rather than 0.dp) so Compose actually
+        // includes it in layout/focus tree — a 0.dp child gets skipped and
+        // FocusRequester.requestFocus() throws "FocusRequester is not
+        // initialized". Sits below the toolbar where it doesn't intercept
+        // any visible touches.
         BasicTextField(
             value = shadow,
             onValueChange = { new ->
@@ -294,7 +296,8 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                 shadow = new
             },
             modifier = Modifier
-                .size(0.dp)
+                .size(1.dp)
+                .alpha(0f)
                 .focusRequester(focusReq)
                 .onPreviewKeyEvent { ev ->
                     if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -319,11 +322,11 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
     }
 }
 
-/// Termius-style shortcut bar above the terminal area. Single tap on any
-/// key sends the matching byte sequence; Ctrl is sticky (next typed letter
-/// becomes Ctrl+letter, then resets). The right-side ⌨ button is the only
-/// way to bring up the soft keyboard now — the terminal grid no longer
-/// auto-focuses the IME when tapped.
+/// Termius-style shortcut bar pinned below the terminal area. Single tap
+/// on any key sends the matching byte sequence; Ctrl is sticky (next
+/// typed letter becomes Ctrl+letter, then resets). The right-side ⌨
+/// button is the only way to bring up the soft keyboard — the terminal
+/// grid above no longer auto-focuses the IME when tapped.
 @Composable
 private fun TerminalToolbar(
     ctrlPending: Boolean,
