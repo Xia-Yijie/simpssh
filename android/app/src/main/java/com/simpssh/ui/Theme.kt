@@ -146,15 +146,22 @@ fun customPalette(
     primary: Color,
     primaryContainer: Color,
     darkBackground: Color,
-): ThemePalette = ThemePalette(
-    name = id,
-    displayName = displayName,
-    primary = primary,
-    onPrimary = bestForeground(primary),
-    primaryContainer = primaryContainer,
-    onPrimaryContainer = bestForeground(primaryContainer),
-    darkBackground = darkBackground,
-    darkSurface = darkBackground.lighten(0.05f),
-    darkSurfaceVariant = darkBackground.lighten(0.10f),
-    custom = true,
-)
+): ThemePalette {
+    // Force opaque alpha — Material's surface/background calculations and
+    // toArgb-based JSON round-trip both assume fully opaque colours.
+    val p = primary.copy(alpha = 1f)
+    val c = primaryContainer.copy(alpha = 1f)
+    val bg = darkBackground.copy(alpha = 1f)
+    return ThemePalette(
+        name = id,
+        displayName = displayName,
+        primary = p,
+        onPrimary = bestForeground(p),
+        primaryContainer = c,
+        onPrimaryContainer = bestForeground(c),
+        darkBackground = bg,
+        darkSurface = bg.lighten(0.05f),
+        darkSurfaceVariant = bg.lighten(0.10f),
+        custom = true,
+    )
+}

@@ -241,6 +241,12 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
             // and brings up the soft keyboard. Renders nothing visible
             // (matchParentSize + alpha 0). Each typed char is sent
             // immediately via the delta logic in onValueChange.
+            //
+            // Caveat: this overlay also absorbs vertical drag gestures, so
+            // the LazyColumn behind it can't be scrolled by touch. That's
+            // acceptable while there's no scrollback (auto-scrolls to
+            // bottom anyway). When scrollback lands, route drag gestures
+            // around or under the field with pointerInput.
             var shadow by remember(tab.id) { mutableStateOf(TextFieldValue("")) }
             BasicTextField(
                 value = shadow,
@@ -248,7 +254,7 @@ private fun ShellBody(tab: TabState, manager: SessionManager, onSendBytes: (Byte
                     val oldText = shadow.text
                     val newText = new.text
                     if (newText != oldText) {
-                        val common = commonPrefixLen(oldText, newText)
+                        val common = oldText.commonPrefixWith(newText).length
                         val toDelete = oldText.length - common
                         val toAdd = newText.substring(common)
                         if (toDelete > 0) onSendBytes(ByteArray(toDelete) { 0x7F })
@@ -333,13 +339,6 @@ private fun StyledRow.toAnnotatedString(): AnnotatedString {
     return b.toAnnotatedString()
 }
 
-private fun commonPrefixLen(a: String, b: String): Int {
-    var i = 0
-    val n = minOf(a.length, b.length)
-    while (i < n && a[i] == b[i]) i++
-    return i
-}
-
 private fun specialKeyBytes(ev: KeyEvent): ByteArray? {
     // Hardware keyboard special keys → ANSI/VT escape sequences.
     return when (ev.key) {
@@ -355,6 +354,19 @@ private fun specialKeyBytes(ev: KeyEvent): ByteArray? {
         Key.Delete         -> "\u001B[3~".toByteArray()
         Key.PageUp         -> "\u001B[5~".toByteArray()
         Key.PageDown       -> "\u001B[6~".toByteArray()
+        // F-keys — used heavily by vim / htop / tmux / midnight commander.
+        Key.F1             -> "\u001BOP".toByteArray()
+        Key.F2             -> "\u001BOQ".toByteArray()
+        Key.F3             -> "\u001BOR".toByteArray()
+        Key.F4             -> "\u001BOS".toByteArray()
+        Key.F5             -> "\u001B[15~".toByteArray()
+        Key.F6             -> "\u001B[17~".toByteArray()
+        Key.F7             -> "\u001B[18~".toByteArray()
+        Key.F8             -> "\u001B[19~".toByteArray()
+        Key.F9             -> "\u001B[20~".toByteArray()
+        Key.F10            -> "\u001B[21~".toByteArray()
+        Key.F11            -> "\u001B[23~".toByteArray()
+        Key.F12            -> "\u001B[24~".toByteArray()
         else -> {
             if (ev.isCtrlPressed) {
                 val cp = ev.utf16CodePoint
