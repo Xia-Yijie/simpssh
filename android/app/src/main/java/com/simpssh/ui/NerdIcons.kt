@@ -21,9 +21,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.simpssh.R
 
-/// Symbols Nerd Font Mono — 10000+ glyphs covering Devicons, Seti UI,
-/// Font Awesome, MDI, Octicons. We render them with [NerdIcon] in place
-/// of any Material Icon.
 val NerdFontFamily = FontFamily(Font(R.font.nerd_symbols))
 
 @Composable
@@ -55,141 +52,139 @@ fun NerdIcon(
                 color = tint,
                 fontFamily = NerdFontFamily,
                 fontSize = fontSize,
-                // lineHeight = fontSize keeps the glyph centered within `size`
-                // (default lineHeight adds ascent/descent padding that pushes
-                // it off-center).
+                // lineHeight 等于 fontSize 才能让字形在 size 盒子里居中;
+                // 默认 lineHeight 会额外加上 ascent/descent 让字形偏离中心。
                 lineHeight = fontSize,
             ),
         )
     }
 }
 
-/// Glyph codepoints we use directly (UI controls + folder/file fallbacks).
-/// All in BMP (no surrogate pairs needed) — taken from Font Awesome / Seti
-/// / Devicons subsets of Nerd Fonts.
 object NerdGlyphs {
-    // Folder / file fallback
-    const val FOLDER         = "\uF07B"   // fa-folder
-    const val FOLDER_OPEN    = "\uF07C"   // fa-folder-open
-    const val FILE           = "\uF15B"   // fa-file
-    const val FOLDER_PLUS    = "\uEEC7"   // fa-folder-plus
+    const val FOLDER         = "\uF07B"
+    const val FOLDER_OPEN    = "\uF07C"
+    const val FILE           = "\uF15B"
+    const val FOLDER_PLUS    = "\uEEC7"
 
-    // Navigation
-    const val ARROW_LEFT     = "\uF060"   // fa-arrow-left
-    const val CHEVRON_UP     = "\uF077"   // fa-chevron-up
-    const val CHEVRON_DOWN   = "\uF078"   // fa-chevron-down
-    const val CHEVRON_RIGHT  = "\uF054"   // fa-chevron-right
-    const val HOME           = "\uF015"   // fa-home
-    const val TIMES          = "\uF00D"   // fa-times (close)
+    const val ARROW_LEFT     = "\uF060"
+    const val CHEVRON_UP     = "\uF077"
+    const val CHEVRON_DOWN   = "\uF078"
+    const val CHEVRON_RIGHT  = "\uF054"
+    const val HOME           = "\uF015"
+    const val TIMES          = "\uF00D"
 
-    // Actions
-    const val PLUS           = "\uF067"   // fa-plus
-    const val TRASH          = "\uF1F8"   // fa-trash
-    const val EDIT           = "\uF044"   // fa-edit
-    const val PENCIL         = "\uF040"   // fa-pencil
-    const val PLAY           = "\uF04B"   // fa-play
-    const val REFRESH        = "\uF021"   // fa-refresh
-    const val UPLOAD         = "\uF093"   // fa-upload
-    const val DOWNLOAD       = "\uF019"   // fa-download
-    const val ELLIPSIS_V     = "\uF142"   // fa-ellipsis-v (more menu)
+    const val PLUS           = "\uF067"
+    const val TRASH          = "\uF1F8"
+    const val EDIT           = "\uF044"
+    const val PENCIL         = "\uF040"
+    const val PLAY           = "\uF04B"
+    const val REFRESH        = "\uF021"
+    const val UPLOAD         = "\uF093"
+    const val DOWNLOAD       = "\uF019"
+    const val ELLIPSIS_V     = "\uF142"
     const val SEARCH         = "\uF002"
 
-    // Misc UI
-    const val TERMINAL       = "\uF120"   // fa-terminal
-    const val CLOUD          = "\uF0C2"   // fa-cloud
-    const val HELP           = "\uF059"   // fa-question-circle
-    const val INFO           = "\uF05A"   // fa-info-circle
-    const val CODE           = "\uF121"   // fa-code
-    const val COG            = "\uF013"   // fa-cog (settings gear)
-    const val KEYBOARD       = "\uF11C"   // fa-keyboard-o
+    const val TERMINAL       = "\uF120"
+    const val CLOUD          = "\uF0C2"
+    const val HELP           = "\uF059"
+    const val INFO           = "\uF05A"
+    const val CODE           = "\uF121"
+    const val COG            = "\uF013"
+    const val KEYBOARD       = "\uF11C"
+    const val MOUSE_POINTER  = "\uF245"
+    const val HAND_POINTER   = "\uF25A"
+    const val HAND_UP        = "\uF0A6"
+    const val HAND_DOWN      = "\uF0A7"
+    const val HAND_LEFT      = "\uF0A5"
+    const val HAND_RIGHT     = "\uF0A4"
+    const val ARROWS_V       = "\uF07D"
+    const val ARROWS_H       = "\uF07E"
+    const val COMPRESS       = "\uF066"
+    const val EXPAND         = "\uF065"
+    const val FILE_TEXT      = "\uF15C"
+    const val FILE_IMAGE     = "\uF1C5"
+    const val FILE_VIDEO     = "\uF1C8"
+    const val FILE_AUDIO     = "\uF1C7"
+    const val COPY           = "\uF0C5"
+
+    // 借用 fa-align-left 作为自动换行开关图标(Nerd Font 没有专门的 wrap 字形)。
+    const val WRAP_TEXT      = "\uF036"
 }
 
-/// Map a filename to a Nerd Font glyph based on its extension. Falls back to
-/// the generic file glyph for unknown extensions.
 fun glyphForFile(name: String): String {
     val ext = name.substringAfterLast('.', "").lowercase()
     if (ext.isEmpty()) {
-        // No extension — special-case a few common dotfiles
         return when (name.lowercase()) {
-            ".gitignore", ".gitattributes" -> "\uE702"  // dev-git
-            "dockerfile" -> "\uE650"                    // seti-docker
-            "makefile" -> "\uE673"                      // seti-makefile
-            "license" -> "\uF15C"                       // fa-file-text-o
-            "readme" -> "\uE609"                        // seti-markdown
+            ".gitignore", ".gitattributes" -> "\uE702"
+            "dockerfile" -> "\uE650"
+            "makefile" -> "\uE673"
+            "license" -> NerdGlyphs.FILE_TEXT
+            "readme" -> "\uE609"
             else -> NerdGlyphs.FILE
         }
     }
     return when (ext) {
-        // Programming languages (Seti UI subset for VSCode-like consistency)
-        "py", "pyw", "pyi" -> "\uE606"                  // seti-python
-        "rs" -> "\uE68B"                                // seti-rust
-        "js", "mjs", "cjs" -> "\uE60C"                  // seti-javascript
-        "jsx" -> "\uE7BA"                               // dev-react
-        "ts" -> "\uE628"                                // seti-typescript
-        "tsx" -> "\uE7BA"                               // dev-react
-        "go" -> "\uE627"                                // seti-go
-        "java", "class", "jar" -> "\uE66D"              // seti-java
-        "kt", "kts" -> "\uE634"                         // seti-kotlin
-        "c" -> "\uE649"                                 // seti-c
-        "cpp", "cc", "cxx", "c++" -> "\uE646"           // seti-cpp
-        "h", "hpp", "hh" -> "\uE645"                    // seti-c-h (header)
-        "rb" -> "\uE605"                                // seti-ruby
-        "swift" -> "\uE699"                             // seti-swift
-        "lua" -> "\uE620"                               // dev-lua
-        "php" -> "\uE73D"                               // dev-php
-        "scala", "sc" -> "\uE737"                       // dev-scala
-        "cs" -> "\uE648"                                // seti-c-sharp
-        "vue" -> "\uE6A0"                               // seti-vue
-        "dart" -> "\uE798"                              // dev-dart
-        "r" -> "\uE68A"                                 // seti-r
-        "jl" -> "\uE624"                                // seti-julia
-        "ex", "exs" -> "\uE62D"                         // seti-elixir
+        "py", "pyw", "pyi" -> "\uE606"
+        "rs" -> "\uE68B"
+        "js", "mjs", "cjs" -> "\uE60C"
+        "jsx" -> "\uE7BA"
+        "ts" -> "\uE628"
+        "tsx" -> "\uE7BA"
+        "go" -> "\uE627"
+        "java", "class", "jar" -> "\uE66D"
+        "kt", "kts" -> "\uE634"
+        "c" -> "\uE649"
+        "cpp", "cc", "cxx", "c++" -> "\uE646"
+        "h", "hpp", "hh" -> "\uE645"
+        "rb" -> "\uE605"
+        "swift" -> "\uE699"
+        "lua" -> "\uE620"
+        "php" -> "\uE73D"
+        "scala", "sc" -> "\uE737"
+        "cs" -> "\uE648"
+        "vue" -> "\uE6A0"
+        "dart" -> "\uE798"
+        "r" -> "\uE68A"
+        "jl" -> "\uE624"
+        "ex", "exs" -> "\uE62D"
 
-        // Markup / docs
-        "md", "markdown" -> "\uE609"                    // seti-markdown
-        "rst", "txt", "log" -> "\uF15C"                 // fa-file-text-o
-        "tex" -> "\uE69B"                               // seti-tex
+        "md", "markdown" -> "\uE609"
+        "rst", "txt", "log" -> NerdGlyphs.FILE_TEXT
+        "tex" -> "\uE69B"
 
-        // Web
-        "html", "htm", "xhtml" -> "\uE60E"              // seti-html
-        "css" -> "\uE614"                               // seti-css
-        "scss", "sass" -> "\uE603"                      // seti-sass
-        "less" -> "\uE60B"                              // seti-less
+        "html", "htm", "xhtml" -> "\uE60E"
+        "css" -> "\uE614"
+        "scss", "sass" -> "\uE603"
+        "less" -> "\uE60B"
 
-        // Data / config
-        "json", "json5", "jsonl" -> "\uE60B"            // seti-json
-        "yaml", "yml" -> "\uE6A8"                       // seti-yml
-        "toml" -> "\uE6B2"                              // seti-config (approx)
-        "xml" -> "\uF72D"                               // mdi-xml (BMP fallback)
-        "ini", "conf", "cfg", "properties" -> "\uE615"  // seti-config
-        "csv", "tsv" -> "\uE64A"                        // seti-csv
-        "sql" -> "\uE706"                               // dev-database
-        "db", "sqlite", "sqlite3" -> "\uE7C4"           // dev-database alt
+        "json", "json5", "jsonl" -> "\uE60B"
+        "yaml", "yml" -> "\uE6A8"
+        "toml" -> "\uE6B2"
+        // seti-xml 在 BMP 之外,这里用 mdi-xml 作为 BMP 回退。
+        "xml" -> "\uF72D"
+        "ini", "conf", "cfg", "properties" -> "\uE615"
+        "csv", "tsv" -> "\uE64A"
+        "sql" -> "\uE706"
+        "db", "sqlite", "sqlite3" -> "\uE7C4"
 
-        // Shell
-        "sh", "bash", "zsh", "fish", "ksh" -> "\uE691"  // seti-shell
+        "sh", "bash", "zsh", "fish", "ksh" -> "\uE691"
 
-        // Containers / build
-        "dockerfile" -> "\uE650"                        // seti-docker
-        "mk", "makefile" -> "\uE673"                    // seti-makefile
+        "dockerfile" -> "\uE650"
+        "mk", "makefile" -> "\uE673"
 
-        // Images
-        "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff" -> "\uE60D"  // seti-image
-        "svg" -> "\uE698"                               // seti-svg
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff" -> "\uE60D"
+        "svg" -> "\uE698"
 
-        // Audio / video
-        "mp3", "wav", "flac", "aac", "ogg", "m4a" -> "\uF1C7"  // fa-file-audio-o
-        "mp4", "mov", "mkv", "avi", "webm", "flv" -> "\uF1C8"  // fa-file-video-o
+        "mp3", "wav", "flac", "aac", "ogg", "m4a" -> "\uF1C7"
+        "mp4", "mov", "mkv", "avi", "webm", "flv" -> "\uF1C8"
 
-        // Documents / archives
-        "pdf" -> "\uF1C1"                               // fa-file-pdf-o
-        "zip", "tar", "gz", "bz2", "xz", "7z", "rar" -> "\uF1C6"  // fa-file-archive-o
-        "doc", "docx" -> "\uF1C2"                       // fa-file-word-o
-        "xls", "xlsx" -> "\uF1C3"                       // fa-file-excel-o
-        "ppt", "pptx" -> "\uF1C4"                       // fa-file-powerpoint-o
+        "pdf" -> "\uF1C1"
+        "zip", "tar", "gz", "bz2", "xz", "7z", "rar" -> "\uF1C6"
+        "doc", "docx" -> "\uF1C2"
+        "xls", "xlsx" -> "\uF1C3"
+        "ppt", "pptx" -> "\uF1C4"
 
-        // Fonts
-        "ttf", "otf", "woff", "woff2" -> "\uF031"       // fa-font
+        "ttf", "otf", "woff", "woff2" -> "\uF031"
 
         else -> NerdGlyphs.FILE
     }

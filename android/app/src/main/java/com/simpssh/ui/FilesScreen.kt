@@ -1,8 +1,11 @@
 package com.simpssh.ui
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +29,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -38,24 +42,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.simpssh_core.DirEntry
 
 private sealed class TreeRow {
     data class Entry(val entry: DirEntry, val depth: Int) : TreeRow()
-    /// Inserted when an expanded folder has no children we know of.
-    /// Lets the UI distinguish "(空)" from "尚未加载 / 失败" instead of
-    /// just rendering nothing.
     data class Placeholder(val text: String, val depth: Int, val key: String) : TreeRow()
 }
 
-// Shared by TreeRowView and PlaceholderRow so leading icons line up under
-// each other regardless of which row variant gets rendered.
 private val CHEVRON_COL_SIZE = 20.dp
 private val CHEVRON_ICON_GAP = 8.dp
 
@@ -65,7 +68,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var preview by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var preview by remember { mutableStateOf<PreviewKind?>(null) }
     var renameTarget by remember { mutableStateOf<DirEntry?>(null) }
     var mkdirInDir by remember { mutableStateOf<String?>(null) }
     var pendingDownload by remember { mutableStateOf<DirEntry?>(null) }
@@ -78,12 +81,19 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
         val target = pendingDownload
         pendingDownload = null
         if (uri == null || target == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val bytes = manager.readFileBytes(tab, target.path, max = DOWNLOAD_MAX_BYTES) ?: return@launch
-            withContext(Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } }
-            }
-            withContext(Dispatchers.Main) { tab.filesStatus = "已下载 ${target.name} (${bytes.size} B)" }
+        streamWithProgress(
+            manager = manager,
+            tab = tab,
+            entry = target,
+            initialStatus = "正在下载 ${target.name}",
+            cancelledStatus = "已取消下载",
+            errorLabel = "下载",
+            openOutput = {
+                ctx.contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("openOutputStream returned null")
+            },
+        ) { total ->
+            withContext(Dispatchers.Main) { tab.filesStatus = "已下载 ${target.name} (${humanBytes(total)})" }
         }
     }
 
@@ -108,14 +118,13 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
         }
     }
 
-    // Plain call; flattenTree reads SnapshotState (childrenByPath, expanded),
-    // so Compose recomposes us when those change. Wrapping in remember{} with
-    // .toList()/.toMap() keys would allocate fresh keys every recompose and
-    // defeat the memoization, so we rely on the snapshot tracking instead.
+    // flattenTree 读取 SnapshotState,Compose 依赖此读取触发重组;用 remember 包裹会破坏该订阅。
     val rows = flattenTree(tab, tab.rootPath, depth = 0)
 
+    val clipboard = LocalClipboardManager.current
+    var rootMenuOpen by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -135,26 +144,64 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 maxLines = 1,
             )
-            IconButton(onClick = { gotoOpen = true }) {
-                NerdIcon(NerdGlyphs.HOME, "切换根路径", size = 20.dp)
-            }
-            IconButton(onClick = {
-                scope.launch { manager.loadChildren(tab, tab.rootPath) }
-            }) {
-                NerdIcon(NerdGlyphs.REFRESH, "刷新", size = 20.dp)
+            Box {
+                IconButton(onClick = { rootMenuOpen = true }) {
+                    NerdIcon(NerdGlyphs.ELLIPSIS_V, "更多", size = 20.dp)
+                }
+                DropdownMenu(expanded = rootMenuOpen, onDismissRequest = { rootMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("复制路径") },
+                        onClick = {
+                            rootMenuOpen = false
+                            clipboard.setText(AnnotatedString(tab.rootPath))
+                        },
+                        leadingIcon = { NerdIcon(NerdGlyphs.CODE, null, size = 18.dp) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("切换根路径") },
+                        onClick = {
+                            rootMenuOpen = false
+                            gotoOpen = true
+                        },
+                        leadingIcon = { NerdIcon(NerdGlyphs.HOME, null, size = 18.dp) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("刷新") },
+                        onClick = {
+                            rootMenuOpen = false
+                            scope.launch { manager.loadChildren(tab, tab.rootPath) }
+                        },
+                        leadingIcon = { NerdIcon(NerdGlyphs.REFRESH, null, size = 18.dp) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("在此处新建目录") },
+                        onClick = {
+                            rootMenuOpen = false
+                            mkdirInDir = tab.rootPath
+                        },
+                        leadingIcon = { NerdIcon(NerdGlyphs.FOLDER_PLUS, null, size = 18.dp) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("上传文件到此处") },
+                        onClick = {
+                            rootMenuOpen = false
+                            pendingUploadDir = tab.rootPath
+                            uploadLauncher.launch(arrayOf("*/*"))
+                        },
+                        leadingIcon = { NerdIcon(NerdGlyphs.UPLOAD, null, size = 18.dp) },
+                    )
+                }
             }
         }
 
-        // Status
-        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Text(
-                tab.filesStatus,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-        }
+        FilesStatusBanner(
+            text = tab.filesStatus,
+            busy = tab.filesBusy,
+            progressDone = tab.filesProgressDone,
+            progressTotal = tab.filesProgressTotal,
+            onCancel = { manager.cancelFileOp(tab) },
+        )
 
-        // Tree
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 4.dp),
@@ -167,12 +214,12 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                         depth = row.depth,
                         isExpanded = tab.expanded.contains(row.entry.path),
                         onClick = {
-                            if (row.entry.isDir) {
-                                scope.launch { manager.toggleExpand(tab, row.entry.path) }
-                            } else {
-                                scope.launch {
-                                    val bytes = manager.readFileBytes(tab, row.entry.path) ?: return@launch
-                                    preview = row.entry.path to decodeText(bytes)
+                            when {
+                                row.entry.isDir -> scope.launch { manager.toggleExpand(tab, row.entry.path) }
+                                row.entry.name.endsWith(".apk", ignoreCase = true) ->
+                                    stageAndInstallApk(ctx, manager, tab, row.entry)
+                                else -> scope.launch {
+                                    preview = openFilePreview(manager, tab, row.entry) ?: return@launch
                                 }
                             }
                         },
@@ -205,21 +252,8 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
         }
     }
 
-    // Preview
-    preview?.let { (path, body) ->
-        AlertDialog(
-            onDismissRequest = { preview = null },
-            confirmButton = { TextButton(onClick = { preview = null }) { Text("关闭") } },
-            title = { Text(path.substringAfterLast('/'), maxLines = 1) },
-            text = {
-                Box(modifier = Modifier.height(360.dp).verticalScroll(rememberScrollState())) {
-                    Text(body, style = TerminalTextStyle)
-                }
-            },
-        )
-    }
+    PreviewDialogs(preview = preview, sftp = tab.sftp) { preview = null }
 
-    // mkdir
     mkdirInDir?.let { parent ->
         TextInputDialog(
             title = "在 ${parent.substringAfterLast('/').ifBlank { "/" }} 中新建目录",
@@ -238,7 +272,6 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
         )
     }
 
-    // rename
     renameTarget?.let { entry ->
         TextInputDialog(
             title = "重命名",
@@ -260,7 +293,6 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
         )
     }
 
-    // change root
     if (gotoOpen) {
         TextInputDialog(
             title = "切换根目录",
@@ -280,6 +312,84 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
 private fun rowKey(row: TreeRow): String = when (row) {
     is TreeRow.Entry -> "${row.depth}@${row.entry.path}"
     is TreeRow.Placeholder -> row.key
+}
+
+@Composable
+private fun FilesStatusBanner(
+    text: String,
+    busy: Boolean,
+    progressDone: Long,
+    progressTotal: Long,
+    onCancel: () -> Unit,
+) {
+    if (busy) {
+        val knownSize = progressTotal > 0L
+        val fraction = if (knownSize) {
+            (progressDone.toFloat() / progressTotal.toFloat()).coerceIn(0f, 1f)
+        } else 0f
+        val subtitle = if (knownSize) {
+            "${humanBytes(progressDone)} / ${humanBytes(progressTotal)}  ${(fraction * 100).toInt()}%"
+        } else null
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.primaryContainer),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    if (subtitle != null) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
+                    }
+                }
+                IconButton(onClick = onCancel, modifier = Modifier.size(32.dp)) {
+                    NerdIcon(
+                        NerdGlyphs.TIMES,
+                        "取消",
+                        size = 14.dp,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+            if (knownSize) {
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+    } else {
+        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+    }
+}
+
+internal fun humanBytes(n: Long): String {
+    if (n < 1024L) return "$n B"
+    val kb = n / 1024.0
+    if (kb < 1024.0) return "%.1f KB".format(kb)
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return "%.1f MB".format(mb)
+    return "%.2f GB".format(mb / 1024.0)
 }
 
 @Composable
@@ -314,6 +424,7 @@ private fun TreeRowView(
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -321,7 +432,6 @@ private fun TreeRowView(
             .padding(start = (8 + depth * TREE_INDENT_DP).dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Chevron column (only for dirs; files get matching width to align)
         Box(modifier = Modifier.size(CHEVRON_COL_SIZE), contentAlignment = Alignment.Center) {
             if (entry.isDir) {
                 NerdIcon(
@@ -332,8 +442,6 @@ private fun TreeRowView(
                 )
             }
         }
-        // File / folder icon — folders use the FA folder glyph; files use the
-        // extension-derived glyph for VSCode-style file icons.
         NerdIcon(
             glyph = when {
                 entry.isDir && isExpanded -> NerdGlyphs.FOLDER_OPEN
@@ -357,6 +465,14 @@ private fun TreeRowView(
                 NerdIcon(NerdGlyphs.ELLIPSIS_V, "更多", size = 16.dp)
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text("复制路径") },
+                    onClick = {
+                        menu = false
+                        clipboard.setText(AnnotatedString(entry.path))
+                    },
+                    leadingIcon = { NerdIcon(NerdGlyphs.CODE, null, size = 18.dp) },
+                )
                 onMkdirHere?.let {
                     DropdownMenuItem(
                         text = { Text("在此处新建目录") },
@@ -424,7 +540,7 @@ private fun TextInputDialog(
 
 private fun flattenTree(tab: TabState, path: String, depth: Int): List<TreeRow> {
     val children = tab.childrenByPath[path]
-    if (children == null) return emptyList()  // root not loaded yet — caller renders nothing here
+    if (children == null) return emptyList()
     val out = mutableListOf<TreeRow>()
     for (c in children) {
         out.add(TreeRow.Entry(c, depth))
@@ -440,7 +556,7 @@ private fun flattenTree(tab: TabState, path: String, depth: Int): List<TreeRow> 
     return out
 }
 
-private fun decodeText(bytes: ByteArray): String {
+internal fun decodeText(bytes: ByteArray): String {
     return try {
         val s = bytes.toString(Charsets.UTF_8)
         val bad = s.count { it == '\uFFFD' }
@@ -458,3 +574,81 @@ private fun queryDisplayName(ctx: android.content.Context, uri: Uri): String? {
         }
     }.getOrNull()
 }
+
+private fun stageAndInstallApk(
+    ctx: Context,
+    manager: SessionManager,
+    tab: TabState,
+    entry: DirEntry,
+) {
+    val stagingDir = java.io.File(ctx.cacheDir, APK_STAGING_DIR).apply { mkdirs() }
+    val apkFile = java.io.File(stagingDir, entry.name)
+    stagingDir.listFiles()?.forEach { if (it.name != entry.name) it.delete() }
+    streamWithProgress(
+        manager = manager,
+        tab = tab,
+        entry = entry,
+        initialStatus = "正在下载 ${entry.name}",
+        cancelledStatus = "已取消安装",
+        errorLabel = "下载",
+        openOutput = { java.io.FileOutputStream(apkFile) },
+        onFailure = { apkFile.delete() },
+    ) { total ->
+        withContext(Dispatchers.Main) {
+            tab.filesStatus = "已下载 ${entry.name} (${humanBytes(total)})，启动安装…"
+        }
+        val uri = FileProvider.getUriForFile(
+            ctx, ctx.packageName + FILE_PROVIDER_AUTHORITY_SUFFIX, apkFile,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { ctx.startActivity(intent) }.onFailure { e ->
+            withContext(Dispatchers.Main) { tab.filesStatus = formatError("启动安装器", e) }
+        }
+    }
+}
+
+private fun streamWithProgress(
+    manager: SessionManager,
+    tab: TabState,
+    entry: DirEntry,
+    initialStatus: String,
+    cancelledStatus: String,
+    errorLabel: String,
+    openOutput: () -> java.io.OutputStream,
+    onFailure: () -> Unit = {},
+    onComplete: suspend (Long) -> Unit,
+) {
+    manager.launchFileOp(tab) {
+        withContext(Dispatchers.Main) {
+            tab.filesStatus = initialStatus
+            tab.filesProgressTotal = entry.size.toLong()
+            tab.filesProgressDone = 0L
+        }
+        val total = try {
+            openOutput().use { out ->
+                manager.streamFileTo(tab, entry.path, out) { done ->
+                    withContext(Dispatchers.Main) { tab.filesProgressDone = done }
+                }
+            }
+        } catch (ce: CancellationException) {
+            onFailure()
+            withContext(NonCancellable + Dispatchers.Main) { tab.filesStatus = cancelledStatus }
+            // 必须重新抛出:launchFileOp 依赖 CancellationException 传播来识别取消,吞掉会让取消按钮失效。
+            throw ce
+        } catch (e: Throwable) {
+            onFailure()
+            reportFilesError(tab, errorLabel, e)
+            return@launchFileOp
+        }
+        onComplete(total)
+    }
+}
+
+// 必须与 `res/xml/file_paths.xml` 中声明的子目录名一致,否则 FileProvider 无法暴露该路径。
+private const val APK_STAGING_DIR = "apks"
+
+// 必须与 `AndroidManifest.xml` 中 FileProvider 的 `android:authorities` 后缀一致,否则 getUriForFile 会抛 IllegalArgumentException。
+private const val FILE_PROVIDER_AUTHORITY_SUFFIX = ".fileprovider"

@@ -1,6 +1,7 @@
 package com.simpssh.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,15 +11,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -28,6 +33,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -50,70 +58,280 @@ import java.util.UUID
 fun SettingsScreen(
     currentTheme: String,
     customPalettes: List<ThemePalette>,
+    toolbarKeyIds: List<String>,
+    showModeBadges: Boolean,
     onThemeChange: (String) -> Unit,
+    onToolbarKeysChange: (List<String>) -> Unit,
+    onShowModeBadgesChange: (Boolean) -> Unit,
     onAddCustom: () -> Unit,
     onEditCustom: (ThemePalette) -> Unit,
     onDeleteCustom: (ThemePalette) -> Unit,
     onBack: () -> Unit,
 ) {
+    var tab by remember { mutableStateOf(SettingsTab.Palette) }
+    // 按 tab 提升滚动状态:`when (tab)` 会销毁未选中的 LazyColumn,其内部 state 也会被一起丢掉。
+    val paletteScroll = rememberLazyListState()
+    val toolbarScroll = rememberLazyListState()
+    val devScroll = rememberLazyListState()
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("设置") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { NerdIcon(NerdGlyphs.ARROW_LEFT, null, size = 20.dp) }
-                },
-            )
+            Column {
+                TopAppBar(
+                    title = { Text("设置") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) { NerdIcon(NerdGlyphs.ARROW_LEFT, null, size = 20.dp) }
+                    },
+                )
+                TabRow(selectedTabIndex = tab.ordinal) {
+                    SettingsTabs.forEach { t ->
+                        Tab(
+                            selected = tab == t,
+                            onClick = { tab = t },
+                            text = { Text(t.label) },
+                        )
+                    }
+                }
+            }
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp, end = 16.dp,
-                top = padding.calculateTopPadding() + 12.dp,
-                bottom = padding.calculateBottomPadding() + 16.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item { SectionHeader("配色方案 · 内置") }
-            items(BuiltInPalettes, key = { it.name }) { p ->
+        when (tab) {
+            SettingsTab.Palette -> PaletteTab(
+                padding = padding,
+                listState = paletteScroll,
+                currentTheme = currentTheme,
+                customPalettes = customPalettes,
+                onThemeChange = onThemeChange,
+                onAddCustom = onAddCustom,
+                onEditCustom = onEditCustom,
+                onDeleteCustom = onDeleteCustom,
+            )
+            SettingsTab.Toolbar -> ToolbarTab(
+                padding = padding,
+                listState = toolbarScroll,
+                toolbarKeyIds = toolbarKeyIds,
+                onToolbarKeysChange = onToolbarKeysChange,
+            )
+            SettingsTab.Developer -> DeveloperTab(
+                padding = padding,
+                listState = devScroll,
+                showModeBadges = showModeBadges,
+                onShowModeBadgesChange = onShowModeBadgesChange,
+            )
+        }
+    }
+}
+
+private enum class SettingsTab(val label: String) {
+    Palette("配色方案"),
+    Toolbar("终端工具栏"),
+    Developer("开发者选项"),
+}
+
+private val SettingsTabs: List<SettingsTab> = SettingsTab.values().toList()
+
+@Composable
+private fun PaletteTab(
+    padding: PaddingValues,
+    listState: LazyListState,
+    currentTheme: String,
+    customPalettes: List<ThemePalette>,
+    onThemeChange: (String) -> Unit,
+    onAddCustom: () -> Unit,
+    onEditCustom: (ThemePalette) -> Unit,
+    onDeleteCustom: (ThemePalette) -> Unit,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp, end = 16.dp,
+            top = padding.calculateTopPadding() + 12.dp,
+            bottom = padding.calculateBottomPadding() + 16.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item { SectionHeader("内置") }
+        items(BuiltInPalettes, key = { it.name }) { p ->
+            ThemeRow(
+                palette = p,
+                selected = p.name == currentTheme,
+                onClick = { onThemeChange(p.name) },
+            )
+        }
+
+        item { Spacer(Modifier.height(4.dp)) }
+        item { SectionHeader("自定义") }
+        if (customPalettes.isEmpty()) {
+            item {
+                Text(
+                    "（暂无）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp),
+                )
+            }
+        } else {
+            items(customPalettes, key = { it.name }) { p ->
                 ThemeRow(
                     palette = p,
                     selected = p.name == currentTheme,
                     onClick = { onThemeChange(p.name) },
+                    onEdit = { onEditCustom(p) },
+                    onDelete = { onDeleteCustom(p) },
                 )
             }
+        }
+        item {
+            OutlinedButton(
+                onClick = onAddCustom,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            ) {
+                NerdIcon(NerdGlyphs.PLUS, null, size = 16.dp)
+                Spacer(Modifier.width(6.dp))
+                Text("添加自定义配色")
+            }
+        }
+    }
+}
 
-            item { Spacer(Modifier.height(4.dp)) }
-            item { SectionHeader("配色方案 · 自定义") }
-            if (customPalettes.isEmpty()) {
-                item {
-                    Text(
-                        "（暂无）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp),
-                    )
-                }
-            } else {
-                items(customPalettes, key = { it.name }) { p ->
-                    ThemeRow(
-                        palette = p,
-                        selected = p.name == currentTheme,
-                        onClick = { onThemeChange(p.name) },
-                        onEdit = { onEditCustom(p) },
-                        onDelete = { onDeleteCustom(p) },
-                    )
+@Composable
+private fun ToolbarTab(
+    padding: PaddingValues,
+    listState: LazyListState,
+    toolbarKeyIds: List<String>,
+    onToolbarKeysChange: (List<String>) -> Unit,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp, end = 16.dp,
+            top = padding.calculateTopPadding() + 12.dp,
+            bottom = padding.calculateBottomPadding() + 16.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Text(
+                "勾选要显示在终端底部快捷栏的按键。同组按键之间会自动渲染分隔符。" +
+                    "未勾选的按键仍可在键盘弹出时通过省略号按钮访问。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+            )
+        }
+        items(items = KeyGroups, key = { it.name }) { group ->
+            ToolbarGroupCard(
+                group = group,
+                selectedIds = toolbarKeyIds,
+                onToggle = { keyId, checked ->
+                    val next = if (checked) {
+                        // 保持 AllKeys 的标准顺序,否则每次勾选工具栏按键会被打乱。
+                        val taken = toolbarKeyIds.toSet() + keyId
+                        AllKeys.filter { it.id in taken }.map { it.id }
+                    } else {
+                        toolbarKeyIds.filterNot { it == keyId }
+                    }
+                    onToolbarKeysChange(next)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeveloperTab(
+    padding: PaddingValues,
+    listState: LazyListState,
+    showModeBadges: Boolean,
+    onShowModeBadgesChange: (Boolean) -> Unit,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp, end = 16.dp,
+            top = padding.calculateTopPadding() + 12.dp,
+            bottom = padding.calculateBottomPadding() + 16.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Text(
+                "开发 / 调试用开关。平时不需要开启。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { onShowModeBadgesChange(!showModeBadges) },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("显示模式徽章", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "在工具栏下方显示 BP / ALT / MS 徽章，指示远端当前启用的 xterm 私有模式。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
+                    Switch(checked = showModeBadges, onCheckedChange = onShowModeBadgesChange)
                 }
             }
-            item {
-                OutlinedButton(
-                    onClick = onAddCustom,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        }
+    }
+}
+
+@Composable
+private fun ToolbarGroupCard(
+    group: KeyGroup,
+    selectedIds: List<String>,
+    onToggle: (String, Boolean) -> Unit,
+) {
+    val groupKeys = remember(group) { AllKeys.filter { it.group == group } }
+    if (groupKeys.isEmpty()) return
+    val taken = selectedIds.toSet()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                groupLabel(group),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            groupKeys.forEach { key ->
+                val checked = key.id in taken
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggle(key.id, !checked) }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    NerdIcon(NerdGlyphs.PLUS, null, size = 16.dp)
-                    Spacer(Modifier.width(6.dp))
-                    Text("添加自定义配色")
+                    Checkbox(
+                        checked = checked,
+                        onCheckedChange = { onToggle(key.id, it) },
+                    )
+                    Text(
+                        key.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -185,14 +403,10 @@ private fun ThemeRow(
     }
 }
 
-// macOS-style window control colours (close / minimize / maximize).
 private val MacControlClose    = Color(0xFFFF5F56)
 private val MacControlMinimize = Color(0xFFFFBD2E)
 private val MacControlMaximize = Color(0xFF27C93F)
 
-/// Mini terminal mock-up so users can see what a palette actually feels
-/// like — themed window chrome (3 dots), prompt in primary colour, command
-/// echo in default fg, output in dim fg, all on the dark background.
 @Composable
 private fun TerminalPreview(palette: ThemePalette) {
     val fg = bestForeground(palette.darkBackground)
@@ -248,10 +462,6 @@ private fun Dot(c: Color) {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Custom palette editor
-// ---------------------------------------------------------------------------
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CustomPaletteEditScreen(
@@ -284,6 +494,7 @@ fun CustomPaletteEditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -305,7 +516,6 @@ fun CustomPaletteEditScreen(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
 
-            // Live preview
             if (primary != null && container != null && background != null) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = background),

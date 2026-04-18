@@ -1,10 +1,10 @@
 use std::sync::Mutex;
 
 use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{test::TermSize, Config, Term};
+use alacritty_terminal::term::{test::TermSize, Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Processor};
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -30,15 +30,14 @@ pub struct CursorPos {
     pub col: u32,
 }
 
-/// One run of consecutive cells sharing the same fg/bg/flags. Offsets are
-/// in UTF-16 code units, matching Java/Kotlin string indexing.
+// start/len 以 UTF-16 code unit 为单位,以匹配 Java/Kotlin 的字符串索引;
+// 跨语言传 UTF-8 byte offset 会在 Kotlin 侧用错导致切字符。
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct StyleSpan {
     pub start: u32,
     pub len: u32,
-    pub fg: u32,    // 0xRRGGBB
-    pub bg: u32,    // 0xRRGGBB
-    /// bit 0 = bold, 1 = italic, 2 = underline, 3 = inverse (fg/bg already swapped)
+    pub fg: u32,
+    pub bg: u32,
     pub flags: u32,
 }
 
@@ -73,19 +72,23 @@ impl TerminalView {
         parser.advance(term, &bytes);
     }
 
-    /// Plain-text snapshot, kept for any consumer that doesn't want styling.
-    /// Trims trailing spaces per row.
     pub fn snapshot(&self) -> Vec<String> {
         let g = self.inner.lock().unwrap();
         let grid = g.term.grid();
         let rows = grid.screen_lines();
         let cols = grid.columns();
+        // Grid[Point] 索引的是"实时视口",不是用户当前看到的画面;要看到 scrollback
+        // 里的历史行,必须把 display_offset 从行号里减掉,否则一滚上去就全是空行。
+        let display_offset = grid.display_offset() as i32;
         let mut out = Vec::with_capacity(rows);
         for row in 0..rows {
             let mut line = String::with_capacity(cols);
             for col in 0..cols {
-                let point = Point::new(Line(row as i32), Column(col));
-                line.push(grid[point].c);
+                let point = Point::new(Line(row as i32 - display_offset), Column(col));
+                let cell = &grid[point];
+                if is_rendered_cell(cell.flags) {
+                    line.push(cell.c);
+                }
             }
             while line.ends_with(' ') { line.pop(); }
             out.push(line);
@@ -93,13 +96,12 @@ impl TerminalView {
         out
     }
 
-    /// Snapshot with per-cell colour and style, run-length encoded into spans
-    /// over each row's `text`. Use this to render a coloured terminal in the UI.
     pub fn snapshot_styled(&self) -> Vec<StyledRow> {
         let g = self.inner.lock().unwrap();
         let grid = g.term.grid();
         let rows = grid.screen_lines();
         let cols = grid.columns();
+        let display_offset = grid.display_offset() as i32;
         let mut out = Vec::with_capacity(rows);
         for row in 0..rows {
             let mut text = String::with_capacity(cols);
@@ -109,11 +111,14 @@ impl TerminalView {
             let mut cur = (0u32, 0u32, 0u32);
             let mut have = false;
             for col in 0..cols {
-                let cell = &grid[Point::new(Line(row as i32), Column(col))];
+                let cell = &grid[Point::new(Line(row as i32 - display_offset), Column(col))];
+                if !is_rendered_cell(cell.flags) {
+                    continue;
+                }
                 let raw_fg = resolve_color(cell.fg, DEFAULT_FG);
                 let raw_bg = resolve_color(cell.bg, DEFAULT_BG);
                 let flags = map_flags(cell.flags);
-                // Apply inverse here so the UI never has to think about it.
+                // inverse 在这里就把 fg/bg 交换好,UI 侧不用再判断;否则每个平台都要重复这段逻辑。
                 let (fg, bg) = if flags & INVERSE != 0 { (raw_bg, raw_fg) } else { (raw_fg, raw_bg) };
                 let style = (fg, bg, flags);
                 if have && style != cur {
@@ -141,16 +146,63 @@ impl TerminalView {
 
     pub fn cursor(&self) -> CursorPos {
         let g = self.inner.lock().unwrap();
-        let p = g.term.grid().cursor.point;
-        CursorPos { row: p.line.0 as u32, col: p.column.0 as u32 }
+        let grid = g.term.grid();
+        let p = grid.cursor.point;
+        let screen_lines = grid.screen_lines() as i32;
+        let visible_row = p.line.0 + grid.display_offset() as i32;
+        if visible_row < 0 || visible_row >= screen_lines {
+            // 哨兵值:光标已经被滚出当前视口(用户向上翻 scrollback 时),
+            // 返回 u32::MAX 让调用方跳过渲染而不是画一个错位的光标。
+            return CursorPos { row: u32::MAX, col: 0 };
+        }
+        let grid_row = p.line.0;
+        let max_col = p.column.0;
+        let mut col = 0u32;
+        for grid_col in 0..max_col {
+            let cell = &grid[Point::new(Line(grid_row), Column(grid_col))];
+            if is_rendered_cell(cell.flags) {
+                col += cell.c.len_utf16() as u32;
+            }
+        }
+        CursorPos { row: visible_row as u32, col }
     }
 
-    /// Resize the terminal grid. Caller should also resize the remote PTY
-    /// (via SshSession::resize) so the shell knows the new dimensions.
+    // 契约:调用本方法的同时,调用方必须用同样的 cols/rows 调 SshSession::resize
+    // 同步远端 PTY;只改一边会让终端状态机和服务端输出永久错位。
     pub fn resize(&self, columns: u16, rows: u16) {
         let mut g = self.inner.lock().unwrap();
         let size = TermSize::new(columns as usize, rows as usize);
         g.term.resize(size);
+    }
+
+    // 返回值是性能契约:true 表示 display_offset 实际变了,调用方才需要重跑
+    // snapshot_styled + cursor;滚到 scrollback 顶/底被 clamp 时返回 false,
+    // 让上层跳过整个快照刷新,避免滚动到边界时还在做无用的渲染工作。
+    pub fn scroll_display(&self, delta: i32) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        let before = g.term.grid().display_offset();
+        g.term.scroll_display(Scroll::Delta(delta));
+        g.term.grid().display_offset() != before
+    }
+
+    pub fn reset_scroll(&self) {
+        let mut g = self.inner.lock().unwrap();
+        g.term.scroll_display(Scroll::Bottom);
+    }
+
+    pub fn is_bracketed_paste(&self) -> bool {
+        let g = self.inner.lock().unwrap();
+        g.term.mode().contains(TermMode::BRACKETED_PASTE)
+    }
+
+    pub fn is_mouse_reporting(&self) -> bool {
+        let g = self.inner.lock().unwrap();
+        g.term.mode().intersects(TermMode::MOUSE_MODE)
+    }
+
+    pub fn is_alt_screen(&self) -> bool {
+        let g = self.inner.lock().unwrap();
+        g.term.mode().contains(TermMode::ALT_SCREEN)
     }
 }
 
@@ -223,4 +275,8 @@ fn map_flags(f: Flags) -> u32 {
     if f.contains(Flags::UNDERLINE) { out |= UNDERLINE; }
     if f.contains(Flags::INVERSE)   { out |= INVERSE; }
     out
+}
+
+fn is_rendered_cell(flags: Flags) -> bool {
+    !flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
 }

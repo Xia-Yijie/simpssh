@@ -1,13 +1,8 @@
-//! Minimal interactive SSH session built on `russh`.
-//!
-//! Design: the FFI-facing `SshSession` is sync. Internally an actor task owns
-//! the russh channel and communicates through two tokio mpsc queues. `read`
-//! blocks up to a configurable timeout; `write` never blocks. Concurrency
-//! comes from a per-session tokio runtime we spin up in `connect_password`.
-//!
-//! Host-key verification is TOFU-OFF for this MVP (always accepts). That will
-//! be replaced with a known_hosts-style check before anything ships.
+//! 安全警告:本模块使用 AcceptAny 处理 host key,等于完全关闭 TOFU 校验,
+//! 对任何中间人攻击都是开放的。这是 MVP 阶段的占位方案,上线前必须换成
+//! known_hosts 风格的指纹校验,否则不得发布。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -46,6 +41,7 @@ struct SessionInner {
     _runtime: Runtime,
     cmd_tx: mpsc::UnboundedSender<ActorCmd>,
     rx: Mutex<mpsc::UnboundedReceiver<Vec<u8>>>,
+    closed: Arc<AtomicBool>,
 }
 
 #[derive(uniffi::Object)]
@@ -55,8 +51,6 @@ pub struct SshSession {
 
 #[uniffi::export]
 impl SshSession {
-    /// Connect, authenticate with a password, and open an interactive shell
-    /// with a PTY of the given size. Blocks until the shell is ready.
     #[uniffi::constructor]
     pub fn connect_password(
         host: String,
@@ -74,10 +68,16 @@ impl SshSession {
 
         let (bytes_tx, bytes_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<ActorCmd>();
+        let closed = Arc::new(AtomicBool::new(false));
+        let closed_actor = closed.clone();
 
         rt.block_on(async {
+            // 不设 inactivity_timeout,改用 keepalive:30s 发一次,允许丢 3 次,
+            // 累计 ~90s 才判死。移动网络短时断连很常见,这个窗口可以扛住地铁/电梯
+            // 级别的抖动而不误杀会话,又不会让用户在真正掉线时等太久。
             let config = Arc::new(client::Config {
-                inactivity_timeout: Some(Duration::from_secs(600)),
+                keepalive_interval: Some(Duration::from_secs(30)),
+                keepalive_max: 3,
                 ..Default::default()
             });
             let mut session = client::connect(config, (host.as_str(), port), AcceptAny)
@@ -102,13 +102,26 @@ impl SshSession {
                 .await
                 .map_err(|e| SshError::Shell { msg: e.to_string() })?;
 
+            // Workaround:很多服务端默认 locale 是 C/POSIX,此时 shell 会把非 ASCII
+            // 字节以 \xXX 形式回显,中文会全部变成乱码。强制 UTF-8 locale 规避这个坑。
+            for (name, value) in [
+                ("LANG", "C.UTF-8"),
+                ("LC_CTYPE", "C.UTF-8"),
+                ("LC_ALL", "C.UTF-8"),
+            ] {
+                channel
+                    .set_env(false, name, value)
+                    .await
+                    .map_err(|e| SshError::Shell { msg: e.to_string() })?;
+            }
+
             channel
                 .request_shell(false)
                 .await
                 .map_err(|e| SshError::Shell { msg: e.to_string() })?;
 
             let id: ChannelId = channel.id();
-            tokio::spawn(run_actor(session, channel, id, cmd_rx, bytes_tx));
+            tokio::spawn(run_actor(session, channel, id, cmd_rx, bytes_tx, closed_actor));
             Ok::<(), SshError>(())
         })?;
 
@@ -117,11 +130,15 @@ impl SshSession {
                 _runtime: rt,
                 cmd_tx,
                 rx: Mutex::new(bytes_rx),
+                closed,
             },
         }))
     }
 
-    /// Non-blocking enqueue of bytes to the remote shell's stdin.
+    pub fn is_closed(&self) -> bool {
+        self.inner.closed.load(Ordering::SeqCst)
+    }
+
     pub fn write(&self, bytes: Vec<u8>) -> Result<(), SshError> {
         self.inner
             .cmd_tx
@@ -129,8 +146,6 @@ impl SshSession {
             .map_err(|_| SshError::Closed)
     }
 
-    /// Drain any bytes received from the shell, waiting up to `timeout_ms`
-    /// for the first chunk. Returns an empty vec on timeout or on close.
     pub fn read(&self, timeout_ms: u32) -> Vec<u8> {
         let mut rx = self.inner.rx.lock().unwrap();
         let mut out = Vec::new();
@@ -140,8 +155,6 @@ impl SshSession {
         if !out.is_empty() {
             return out;
         }
-        // Bounded wait. Poll the mpsc directly to avoid holding a future across
-        // another borrow of `rx`.
         let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
         loop {
             match rx.try_recv() {
@@ -179,6 +192,7 @@ async fn run_actor(
     _id: ChannelId,
     mut cmd_rx: mpsc::UnboundedReceiver<ActorCmd>,
     bytes_tx: mpsc::UnboundedSender<Vec<u8>>,
+    closed: Arc<AtomicBool>,
 ) {
     loop {
         tokio::select! {
@@ -210,4 +224,5 @@ async fn run_actor(
             }
         }
     }
+    closed.store(true, Ordering::SeqCst);
 }

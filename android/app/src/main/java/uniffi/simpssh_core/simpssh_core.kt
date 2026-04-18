@@ -762,6 +762,20 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -815,6 +829,8 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_simpssh_core_fn_method_sshsession_disconnect(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_simpssh_core_fn_method_sshsession_is_closed(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_simpssh_core_fn_method_sshsession_read(`ptr`: Pointer,`timeoutMs`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_simpssh_core_fn_method_sshsession_resize(`ptr`: Pointer,`cols`: Short,`rows`: Short,uniffi_out_err: UniffiRustCallStatus, 
@@ -831,12 +847,24 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_simpssh_core_fn_method_terminalview_feed(`ptr`: Pointer,`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_simpssh_core_fn_method_terminalview_is_alt_screen(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_simpssh_core_fn_method_terminalview_is_bracketed_paste(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_simpssh_core_fn_method_terminalview_is_mouse_reporting(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_simpssh_core_fn_method_terminalview_reset_scroll(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_simpssh_core_fn_method_terminalview_resize(`ptr`: Pointer,`columns`: Short,`rows`: Short,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_simpssh_core_fn_method_terminalview_scroll_display(`ptr`: Pointer,`delta`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_simpssh_core_fn_method_terminalview_snapshot(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_simpssh_core_fn_method_terminalview_snapshot_styled(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_simpssh_core_fn_func_init_native_logging(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun ffi_simpssh_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_simpssh_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -949,6 +977,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_simpssh_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_simpssh_core_checksum_func_init_native_logging(
+    ): Short
     fun uniffi_simpssh_core_checksum_method_sftpsession_delete_dir(
     ): Short
     fun uniffi_simpssh_core_checksum_method_sftpsession_delete_file(
@@ -971,6 +1001,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_disconnect(
     ): Short
+    fun uniffi_simpssh_core_checksum_method_sshsession_is_closed(
+    ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_read(
     ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_resize(
@@ -981,7 +1013,17 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_simpssh_core_checksum_method_terminalview_feed(
     ): Short
+    fun uniffi_simpssh_core_checksum_method_terminalview_is_alt_screen(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_terminalview_is_bracketed_paste(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_terminalview_is_mouse_reporting(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_terminalview_reset_scroll(
+    ): Short
     fun uniffi_simpssh_core_checksum_method_terminalview_resize(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_terminalview_scroll_display(
     ): Short
     fun uniffi_simpssh_core_checksum_method_terminalview_snapshot(
     ): Short
@@ -1010,6 +1052,9 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_simpssh_core_checksum_func_init_native_logging() != 56374.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_simpssh_core_checksum_method_sftpsession_delete_dir() != 38855.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1043,13 +1088,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_simpssh_core_checksum_method_sshsession_disconnect() != 58543.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_sshsession_read() != 22841.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_sshsession_is_closed() != 54684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_sshsession_read() != 30899.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_method_sshsession_resize() != 38769.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_sshsession_write() != 55188.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_sshsession_write() != 3168.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_method_terminalview_cursor() != 12443.toShort()) {
@@ -1058,19 +1106,34 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_simpssh_core_checksum_method_terminalview_feed() != 18185.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_terminalview_resize() != 3901.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_is_alt_screen() != 24787.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot() != 26544.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_is_bracketed_paste() != 26991.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot_styled() != 17086.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_is_mouse_reporting() != 55101.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_reset_scroll() != 5684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_resize() != 28461.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_scroll_display() != 7642.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot() != 14771.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_terminalview_snapshot_styled() != 30962.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_constructor_sftpsession_connect_password() != 54200.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_simpssh_core_checksum_constructor_sshsession_connect_password() != 57782.toShort()) {
+    if (lib.uniffi_simpssh_core_checksum_constructor_sshsession_connect_password() != 49734.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_constructor_terminalview_new() != 39538.toShort()) {
@@ -1166,6 +1229,29 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 
     override fun write(value: UInt, buf: ByteBuffer) {
         buf.putInt(value.toInt())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
     }
 }
 
@@ -1833,17 +1919,12 @@ public interface SshSessionInterface {
     
     fun `disconnect`()
     
-    /**
-     * Drain any bytes received from the shell, waiting up to `timeout_ms`
-     * for the first chunk. Returns an empty vec on timeout or on close.
-     */
+    fun `isClosed`(): kotlin.Boolean
+    
     fun `read`(`timeoutMs`: kotlin.UInt): kotlin.ByteArray
     
     fun `resize`(`cols`: kotlin.UShort, `rows`: kotlin.UShort)
     
-    /**
-     * Non-blocking enqueue of bytes to the remote shell's stdin.
-     */
     fun `write`(`bytes`: kotlin.ByteArray)
     
     companion object
@@ -1941,11 +2022,19 @@ open class SshSession: Disposable, AutoCloseable, SshSessionInterface {
     
     
 
+    override fun `isClosed`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_sshsession_is_closed(
+        it, _status)
+}
+    }
+    )
+    }
     
-    /**
-     * Drain any bytes received from the shell, waiting up to `timeout_ms`
-     * for the first chunk. Returns an empty vec on timeout or on close.
-     */override fun `read`(`timeoutMs`: kotlin.UInt): kotlin.ByteArray {
+
+    override fun `read`(`timeoutMs`: kotlin.UInt): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     callWithPointer {
     uniffiRustCall() { _status ->
@@ -1970,9 +2059,6 @@ open class SshSession: Disposable, AutoCloseable, SshSessionInterface {
     
 
     
-    /**
-     * Non-blocking enqueue of bytes to the remote shell's stdin.
-     */
     @Throws(SshException::class)override fun `write`(`bytes`: kotlin.ByteArray)
         = 
     callWithPointer {
@@ -1989,10 +2075,6 @@ open class SshSession: Disposable, AutoCloseable, SshSessionInterface {
     
     companion object {
         
-    /**
-     * Connect, authenticate with a password, and open an interactive shell
-     * with a PTY of the given size. Blocks until the shell is ready.
-     */
     @Throws(SshException::class) fun `connectPassword`(`host`: kotlin.String, `port`: kotlin.UShort, `user`: kotlin.String, `password`: kotlin.String, `cols`: kotlin.UShort, `rows`: kotlin.UShort): SshSession {
             return FfiConverterTypeSshSession.lift(
     uniffiRustCallWithError(SshException) { _status ->
@@ -2141,22 +2223,30 @@ public interface TerminalViewInterface {
     
     fun `feed`(`bytes`: kotlin.ByteArray)
     
+    fun `isAltScreen`(): kotlin.Boolean
+    
+    fun `isBracketedPaste`(): kotlin.Boolean
+    
+    fun `isMouseReporting`(): kotlin.Boolean
+    
+    fun `resetScroll`()
+    
     /**
-     * Resize the terminal grid. Caller should also resize the remote PTY
-     * (via SshSession::resize) so the shell knows the new dimensions.
+     * Caller must also resize the remote PTY via `SshSession::resize`.
      */
     fun `resize`(`columns`: kotlin.UShort, `rows`: kotlin.UShort)
     
     /**
-     * Plain-text snapshot, kept for any consumer that doesn't want styling.
-     * Trims trailing spaces per row.
+     * Positive `delta` scrolls into scrollback; negative scrolls toward
+     * the live edge.
+     * Returns true if the display offset actually changed. Callers use
+     * this to skip the full `snapshot_styled` + `cursor` refresh when
+     * scrolling is clamped at the top/bottom of scrollback.
      */
+    fun `scrollDisplay`(`delta`: kotlin.Int): kotlin.Boolean
+    
     fun `snapshot`(): List<kotlin.String>
     
-    /**
-     * Snapshot with per-cell colour and style, run-length encoded into spans
-     * over each row's `text`. Use this to render a coloured terminal in the UI.
-     */
     fun `snapshotStyled`(): List<StyledRow>
     
     companion object
@@ -2273,10 +2363,56 @@ open class TerminalView: Disposable, AutoCloseable, TerminalViewInterface {
     
     
 
+    override fun `isAltScreen`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_is_alt_screen(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `isBracketedPaste`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_is_bracketed_paste(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `isMouseReporting`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_is_mouse_reporting(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `resetScroll`()
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_reset_scroll(
+        it, _status)
+}
+    }
+    
+    
+
     
     /**
-     * Resize the terminal grid. Caller should also resize the remote PTY
-     * (via SshSession::resize) so the shell knows the new dimensions.
+     * Caller must also resize the remote PTY via `SshSession::resize`.
      */override fun `resize`(`columns`: kotlin.UShort, `rows`: kotlin.UShort)
         = 
     callWithPointer {
@@ -2290,9 +2426,24 @@ open class TerminalView: Disposable, AutoCloseable, TerminalViewInterface {
 
     
     /**
-     * Plain-text snapshot, kept for any consumer that doesn't want styling.
-     * Trims trailing spaces per row.
-     */override fun `snapshot`(): List<kotlin.String> {
+     * Positive `delta` scrolls into scrollback; negative scrolls toward
+     * the live edge.
+     * Returns true if the display offset actually changed. Callers use
+     * this to skip the full `snapshot_styled` + `cursor` refresh when
+     * scrolling is clamped at the top/bottom of scrollback.
+     */override fun `scrollDisplay`(`delta`: kotlin.Int): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_terminalview_scroll_display(
+        it, FfiConverterInt.lower(`delta`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `snapshot`(): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
     callWithPointer {
     uniffiRustCall() { _status ->
@@ -2304,11 +2455,7 @@ open class TerminalView: Disposable, AutoCloseable, TerminalViewInterface {
     }
     
 
-    
-    /**
-     * Snapshot with per-cell colour and style, run-length encoded into spans
-     * over each row's `text`. Use this to render a coloured terminal in the UI.
-     */override fun `snapshotStyled`(): List<StyledRow> {
+    override fun `snapshotStyled`(): List<StyledRow> {
             return FfiConverterSequenceTypeStyledRow.lift(
     callWithPointer {
     uniffiRustCall() { _status ->
@@ -2443,8 +2590,7 @@ public object FfiConverterTypeDirEntry: FfiConverterRustBuffer<DirEntry> {
 
 
 /**
- * One run of consecutive cells sharing the same fg/bg/flags. Offsets are
- * in UTF-16 code units, matching Java/Kotlin string indexing.
+ * Offsets are UTF-16 code units, matching Java/Kotlin string indexing.
  */
 data class StyleSpan (
     var `start`: kotlin.UInt, 
@@ -2872,4 +3018,16 @@ public object FfiConverterSequenceTypeStyledRow: FfiConverterRustBuffer<List<Sty
         }
     }
 }
+        /**
+         * Routes Rust panics + `log` output to logcat. `Once` guards the
+         * `set_hook` call — that one stacks if invoked repeatedly.
+         */ fun `initNativeLogging`()
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_func_init_native_logging(
+        _status)
+}
+    
+    
+
 

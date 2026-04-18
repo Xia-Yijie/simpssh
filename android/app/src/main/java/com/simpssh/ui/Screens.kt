@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,7 +52,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,10 +64,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.simpssh.data.InitScript
 import com.simpssh.data.Server
-
-// ---------------------------------------------------------------------------
-// Server list
-// ---------------------------------------------------------------------------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,10 +95,6 @@ fun ServerListScreen(
             )
         },
         floatingActionButton = {
-            // IntrinsicSize.Max sizes the column to its widest child
-            // (添加服务器). All three FABs use start-aligned content + the
-            // shorter ones fillMaxWidth, so icons line up at the same X
-            // and the column doesn't stretch beyond what 添加服务器 needs.
             Column(
                 modifier = Modifier.width(IntrinsicSize.Max),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -152,10 +149,6 @@ fun ServerListScreen(
     if (showGuide) GuideDialog(onDismiss = { showGuide = false })
 }
 
-/// FAB with start-aligned (icon, label) content so multiple FABs stacked
-/// vertically share the same icon X column. Width is whatever the parent
-/// gives (e.g. fillMaxWidth inside an IntrinsicSize.Max column to match
-/// the widest sibling); otherwise it sizes to its content.
 @Composable
 private fun AlignedFab(
     glyph: String,
@@ -314,10 +307,6 @@ private fun ScriptOption(label: String, onConnect: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Operation guide dialog
-// ---------------------------------------------------------------------------
-
 @Composable
 private fun GuideDialog(onDismiss: () -> Unit) {
     AlertDialog(
@@ -325,14 +314,52 @@ private fun GuideDialog(onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
         title = { Text("操作指南") },
         text = {
-            Column {
-                GuideRow("单击主机", "展开/收起 启动方式")
-                GuideRow("▶ 按钮", "用该启动方式连接（自动开新会话）")
-                GuideRow("长按主机", "进入编辑页（含删除）")
-                GuideRow("会话 (N)", "切回正在运行的多个会话标签")
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                GuideSection("主机列表") {
+                    IconGuideRow(NerdGlyphs.HAND_POINTER, "单击主机", "展开/收起启动方式")
+                    IconGuideRow(NerdGlyphs.PLAY, "▶ 按钮", "用该启动方式连接（自动开新会话）")
+                    IconGuideRow(NerdGlyphs.EDIT, "长按主机", "进入编辑页（含删除）")
+                    IconGuideRow(NerdGlyphs.TERMINAL, "会话 (N)", "切回正在运行的多个会话")
+                }
+
+                GuideSection("终端触屏手势") {
+                    GestureGuideRow(Gesture.TAP, "单指单击", "鼠标模式下发送左键点击")
+                    GestureGuideRow(Gesture.TWO_TAP, "双指同时点", "发送右键点击")
+                    GestureGuideRow(Gesture.LONG_PRESS, "长按", "选中单词并进入选择模式;之后拖动手柄调整范围，可复制/粘贴")
+                    GestureGuideRow(Gesture.SWIPE_H, "左右滑动", "发送 Tab / Shift+Tab")
+                    GestureGuideRow(Gesture.SWIPE_V, "上下拖动", "滚动历史（或 TUI 的上下键 / 鼠标滚轮）")
+                    GestureGuideRow(Gesture.PINCH, "双指捏合", "缩放终端字号")
+                }
+
+                GuideSection("终端工具栏") {
+                    IconGuideRow(NerdGlyphs.MOUSE_POINTER, "鼠标模式", "开启后单击发送鼠标事件")
+                    IconGuideRow(NerdGlyphs.HAND_POINTER, "修饰键", "Shift/Ctrl/Alt 吸附到下一次输入")
+                    IconGuideRow(NerdGlyphs.KEYBOARD, "键盘按钮", "弹出软键盘；键盘已开时变为更多按键")
+                    IconGuideRow(NerdGlyphs.ARROWS_V, "更多按键", "长按 ↑↓ 等方向键可连续发送")
+                }
+
+                GuideSection("文件") {
+                    IconGuideRow(NerdGlyphs.FOLDER, "点击目录", "展开/收起子目录")
+                    IconGuideRow(NerdGlyphs.FILE_TEXT, "点击文本/代码", "代码文件自动识别语言并语法高亮")
+                    IconGuideRow(NerdGlyphs.FILE_IMAGE, "点击图片", "内置查看器，双指缩放 / 拖动")
+                    IconGuideRow(NerdGlyphs.FILE_VIDEO, "点击音视频", "流式拉取，无需等待完全下载")
+                    IconGuideRow(NerdGlyphs.DOWNLOAD, "点击 .apk", "下载后直接调起安装器")
+                    IconGuideRow(NerdGlyphs.ELLIPSIS_V, "⋮ 菜单", "下载 / 上传 / 新建目录 / 重命名 / 删除")
+                    IconGuideRow(NerdGlyphs.REFRESH, "下载进行时", "顶部有进度条，可点击 × 取消")
+                }
+
+                GuideSection("设置") {
+                    IconGuideRow(NerdGlyphs.KEYBOARD, "键盘", "定制工具栏按键顺序 / 可见性")
+                    IconGuideRow(NerdGlyphs.CODE, "开发者", "显示 BP / ALT / MS 模式徽章等")
+                }
+
                 Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     "作者：夏义杰",
                     style = MaterialTheme.typography.bodySmall,
@@ -349,11 +376,43 @@ private fun GuideDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun GuideRow(action: String, desc: String) {
-    Row(modifier = Modifier.padding(vertical = 4.dp)) {
+private fun GuideSection(title: String, content: @Composable () -> Unit) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+    )
+    content()
+}
+
+@Composable
+private fun IconGuideRow(glyph: String, action: String, desc: String) = GuideRow(
+    leading = {
+        NerdIcon(glyph, null, size = 18.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    },
+    action = action,
+    desc = desc,
+)
+
+@Composable
+private fun GestureGuideRow(gesture: Gesture, action: String, desc: String) = GuideRow(
+    leading = { GestureGlyph(gesture, modifier = Modifier.size(32.dp)) },
+    action = action,
+    desc = desc,
+)
+
+@Composable
+private fun GuideRow(leading: @Composable () -> Unit, action: String, desc: String) {
+    Row(
+        modifier = Modifier.padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.size(32.dp), contentAlignment = Alignment.Center) { leading() }
+        Spacer(Modifier.width(8.dp))
         Text(
             action,
-            modifier = Modifier.width(108.dp),
+            modifier = Modifier.width(88.dp),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
         )
@@ -365,9 +424,66 @@ private fun GuideRow(action: String, desc: String) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Server edit
-// ---------------------------------------------------------------------------
+private enum class Gesture { TAP, TWO_TAP, LONG_PRESS, SWIPE_H, SWIPE_V, PINCH }
+
+@Composable
+private fun GestureGlyph(gesture: Gesture, modifier: Modifier = Modifier) {
+    val color = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2
+        val cy = h / 2
+        val r = minOf(w, h) * 0.14f
+        when (gesture) {
+            Gesture.TAP -> {
+                drawCircle(color = color.copy(alpha = 0.25f), radius = r * 2.2f, center = Offset(cx, cy))
+                drawCircle(color = color, radius = r, center = Offset(cx, cy))
+            }
+            Gesture.TWO_TAP -> {
+                drawCircle(color = color, radius = r, center = Offset(w * 0.34f, cy))
+                drawCircle(color = color, radius = r, center = Offset(w * 0.66f, cy))
+            }
+            Gesture.LONG_PRESS -> {
+                val stroke = Stroke(width = 2.5f)
+                drawCircle(color = color.copy(alpha = 0.18f), radius = r * 3.2f, center = Offset(cx, cy), style = stroke)
+                drawCircle(color = color.copy(alpha = 0.35f), radius = r * 2.2f, center = Offset(cx, cy), style = stroke)
+                drawCircle(color = color, radius = r, center = Offset(cx, cy))
+            }
+            Gesture.SWIPE_H -> drawAxisArrow(color, Offset(w * 0.15f, cy), Offset(w * 0.85f, cy))
+            Gesture.SWIPE_V -> drawAxisArrow(color, Offset(cx, h * 0.15f), Offset(cx, h * 0.85f))
+            Gesture.PINCH -> {
+                drawCircle(color, radius = r * 0.9f, center = Offset(w * 0.25f, cy))
+                drawCircle(color, radius = r * 0.9f, center = Offset(w * 0.75f, cy))
+                drawAxisArrow(color, Offset(w * 0.65f, cy), Offset(w * 0.35f, cy), stroke = 2f, barb = 5f)
+            }
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAxisArrow(
+    color: Color,
+    from: Offset,
+    to: Offset,
+    stroke: Float = 2.5f,
+    barb: Float = 7f,
+) {
+    drawLine(color, from, to, strokeWidth = stroke)
+    val horizontal = kotlin.math.abs(to.x - from.x) > kotlin.math.abs(to.y - from.y)
+    val headOffset = barb * 1.8f
+    val (h1, h2) = if (horizontal) {
+        val sign = if (to.x > from.x) 1f else -1f
+        Offset(from.x + headOffset * sign, from.y) to Offset(to.x - headOffset * sign, to.y)
+    } else {
+        val sign = if (to.y > from.y) 1f else -1f
+        Offset(from.x, from.y + headOffset * sign) to Offset(to.x, to.y - headOffset * sign)
+    }
+    val (perpFrom, perpTo) = if (horizontal) (0f to barb) else (barb to 0f)
+    drawLine(color, from, Offset(h1.x + perpFrom, h1.y + perpTo), strokeWidth = stroke)
+    drawLine(color, from, Offset(h1.x - perpFrom, h1.y - perpTo), strokeWidth = stroke)
+    drawLine(color, to, Offset(h2.x + perpFrom, h2.y + perpTo), strokeWidth = stroke)
+    drawLine(color, to, Offset(h2.x - perpFrom, h2.y - perpTo), strokeWidth = stroke)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -400,6 +516,7 @@ fun ServerEditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

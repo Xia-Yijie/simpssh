@@ -3,6 +3,7 @@ package com.simpssh.data
 import android.content.Context
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import com.simpssh.ui.DefaultToolbarKeyIds
 import com.simpssh.ui.ThemePalette
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,6 +14,38 @@ class PreferencesRepository(context: Context) {
     var themeName: String
         get() = prefs.getString(KEY_THEME, "default") ?: "default"
         set(v) { prefs.edit().putString(KEY_THEME, v).apply() }
+
+    // 必须先用 isFinite 排除 NaN,单独的 coerceIn 不会把 NaN 夹回范围,
+    // 脏值会一路传到文本布局引起崩溃
+    var terminalFontSize: Float
+        get() {
+            val raw = prefs.getFloat(KEY_FONT_SIZE, DEFAULT_TERM_FONT_SIZE)
+            return if (raw.isFinite()) raw.coerceIn(TERM_FONT_SIZE_MIN, TERM_FONT_SIZE_MAX)
+                   else DEFAULT_TERM_FONT_SIZE
+        }
+        set(v) {
+            val safe = if (v.isFinite()) v.coerceIn(TERM_FONT_SIZE_MIN, TERM_FONT_SIZE_MAX)
+                       else DEFAULT_TERM_FONT_SIZE
+            prefs.edit().putFloat(KEY_FONT_SIZE, safe).apply()
+        }
+
+    var showModeBadges: Boolean
+        get() = prefs.getBoolean(KEY_MODE_BADGES, false)
+        set(v) { prefs.edit().putBoolean(KEY_MODE_BADGES, v).apply() }
+
+    var toolbarKeyIds: List<String>
+        get() {
+            val raw = prefs.getString(KEY_TOOLBAR, null) ?: return DefaultToolbarKeyIds
+            return runCatching {
+                val arr = JSONArray(raw)
+                (0 until arr.length()).map { arr.getString(it) }
+            }.getOrElse { DefaultToolbarKeyIds }
+        }
+        set(v) {
+            val arr = JSONArray()
+            v.forEach { arr.put(it) }
+            prefs.edit().putString(KEY_TOOLBAR, arr.toString()).apply()
+        }
 
     fun loadCustomPalettes(): List<ThemePalette> {
         val raw = prefs.getString(KEY_CUSTOM, null) ?: return emptyList()
@@ -59,5 +92,12 @@ class PreferencesRepository(context: Context) {
     private companion object {
         const val KEY_THEME = "theme"
         const val KEY_CUSTOM = "custom_palettes"
+        const val KEY_TOOLBAR = "toolbar_keys"
+        const val KEY_FONT_SIZE = "terminal_font_size"
+        const val KEY_MODE_BADGES = "show_mode_badges"
     }
 }
+
+const val DEFAULT_TERM_FONT_SIZE: Float = 11f
+const val TERM_FONT_SIZE_MIN: Float = 8f
+const val TERM_FONT_SIZE_MAX: Float = 28f

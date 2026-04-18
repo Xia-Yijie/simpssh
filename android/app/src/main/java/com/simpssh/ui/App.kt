@@ -28,17 +28,21 @@ private sealed class Screen {
 }
 
 @Composable
-fun App() {
+fun App(crashReport: String? = null) {
     val ctx = LocalContext.current
+    var pendingCrash by remember { mutableStateOf(crashReport) }
     val repo = remember { ServerRepository(ctx) }
     val prefs = remember { PreferencesRepository(ctx) }
     val scope = rememberCoroutineScope()
-    val sessions = remember { SessionManager(scope) }
+    val sessions = remember { SessionManager(scope, ctx) }
     var servers by remember { mutableStateOf(repo.load()) }
     var screen by remember { mutableStateOf<Screen>(Screen.List) }
     var themeName by remember { mutableStateOf(prefs.themeName) }
     val customPalettes = remember { prefs.loadCustomPalettes().toMutableStateList() }
     val palette = resolvePalette(themeName, customPalettes)
+    var toolbarKeyIds by remember { mutableStateOf(prefs.toolbarKeyIds) }
+    var terminalFontSize by remember { mutableStateOf(prefs.terminalFontSize) }
+    var showModeBadges by remember { mutableStateOf(prefs.showModeBadges) }
 
     fun reload() { servers = repo.load() }
 
@@ -47,6 +51,9 @@ fun App() {
     }
 
     SimpsshTheme(palette = palette) {
+        pendingCrash?.let { body ->
+            CrashReportDialog(body = body, onDismiss = { pendingCrash = null })
+        }
         AnimatedContent(
             targetState = screen,
             transitionSpec = {
@@ -89,14 +96,31 @@ fun App() {
                 }
                 is Screen.Sessions -> SessionsScreen(
                     manager = sessions,
+                    toolbarKeyIds = toolbarKeyIds,
+                    terminalFontSize = terminalFontSize,
+                    onTerminalFontSizeChange = {
+                        terminalFontSize = it
+                        prefs.terminalFontSize = it
+                    },
+                    showModeBadges = showModeBadges,
                     onHome = { screen = Screen.List },
                 )
                 is Screen.Settings -> SettingsScreen(
                     currentTheme = themeName,
                     customPalettes = customPalettes,
+                    toolbarKeyIds = toolbarKeyIds,
+                    showModeBadges = showModeBadges,
                     onThemeChange = {
                         prefs.themeName = it
                         themeName = it
+                    },
+                    onToolbarKeysChange = {
+                        prefs.toolbarKeyIds = it
+                        toolbarKeyIds = it
+                    },
+                    onShowModeBadgesChange = {
+                        prefs.showModeBadges = it
+                        showModeBadges = it
                     },
                     onAddCustom = { screen = Screen.CustomPaletteEdit(name = null) },
                     onEditCustom = { screen = Screen.CustomPaletteEdit(name = it.name) },
@@ -119,7 +143,6 @@ fun App() {
                             val idx = customPalettes.indexOfFirst { it.name == saved.name }
                             if (idx >= 0) customPalettes[idx] = saved else customPalettes.add(saved)
                             prefs.saveCustomPalettes(customPalettes.toList())
-                            // Auto-select the newly saved palette
                             themeName = saved.name
                             prefs.themeName = saved.name
                             screen = Screen.Settings

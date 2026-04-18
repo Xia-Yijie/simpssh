@@ -1,11 +1,3 @@
-//! Minimal SFTP client over russh.
-//!
-//! Owns its own SSH connection and tokio runtime so that opening a Files tab
-//! is independent from any open shell session. The FFI surface is sync;
-//! internally we `block_on` an actor task. Each operation is wrapped in a
-//! one-shot retry: if the first attempt fails with what looks like a
-//! connection-closed error, we silently re-handshake and try once more.
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -31,13 +23,9 @@ pub enum SftpError {
 
 fn io_err(e: impl std::fmt::Display) -> SftpError { SftpError::Io { msg: e.to_string() } }
 
-/// Heuristic: should we attempt one transparent reconnect?
-///
-/// russh-sftp 2.1 / russh 0.60 don't export a typed "session is gone" variant
-/// — they bubble up the underlying io::Error message. Match the substrings
-/// known to mean "the underlying SSH session is dead" so we can re-handshake.
-/// Only `Io` and `Subsystem` errors are eligible; `Connect` and `Auth` errors
-/// must propagate unchanged so we don't loop on bad credentials.
+// 只能做字符串 substring 匹配:russh-sftp 把底层断开全部裹成通用 io::Error,
+// 没有暴露类型化的 "session gone" variant,没法按 enum 区分。只匹配 Io/Subsystem
+// 是为了避免在凭据错误(Auth)等业务错误上误触发重连。
 fn looks_disconnected(err: &SftpError) -> bool {
     let msg = match err {
         SftpError::Io { msg } => msg.as_str(),
@@ -72,8 +60,6 @@ struct ConnectArgs {
     password: String,
 }
 
-/// One full SFTP handshake. Used both at first connect and when the session
-/// dies and we need to silently reconnect.
 async fn establish(args: &ConnectArgs) -> Result<(Arc<SftpInner>, client::Handle<AcceptAny>), SftpError> {
     let config = Arc::new(client::Config {
         inactivity_timeout: Some(Duration::from_secs(600)),
@@ -112,8 +98,6 @@ pub struct SftpSession {
 }
 
 impl SftpSession {
-    /// Re-handshakes and atomically swaps in the new sftp client + session
-    /// handle. Old client handle is dropped, which sends an SSH disconnect.
     fn reconnect(&self) -> Result<(), SftpError> {
         let (new_sftp, newclient) = self.runtime.block_on(establish(&self.creds))?;
         *self.sftp.lock().unwrap() = new_sftp;
@@ -121,9 +105,9 @@ impl SftpSession {
         Ok(())
     }
 
-    /// Run `op` once; if it fails with a connection-closed-looking error,
-    /// reconnect and run it again. The closure is `Fn` (not `FnOnce`) so the
-    /// caller must clone any captured String/Vec inside the closure body.
+    // 这里故意用 Fn 而不是 FnOnce,因为断连时要能第二次调用同一个闭包重跑操作。
+    // 代价是:调用方捕获的 String/Vec 必须在闭包内部 clone,不能直接 move 消费,
+    // 否则第一次调用就把值吃掉,重试时 borrow checker 会报 already moved。
     fn retry_once<T, F>(&self, op: F) -> Result<T, SftpError>
     where
         F: Fn() -> Result<T, SftpError>,
@@ -224,15 +208,16 @@ impl SftpSession {
             let path = path.clone();
             self.runtime.block_on(async move {
                 let mut f = sftp.open_with_flags(&path, OpenFlags::READ).await.map_err(io_err)?;
-                f.seek(SeekFrom::Start(offset)).await.map_err(io_err)?;
-                let mut buf = vec![0u8; len as usize];
-                let mut total = 0usize;
-                while total < buf.len() {
-                    let n = f.read(&mut buf[total..]).await.map_err(io_err)?;
-                    if n == 0 { break; }
-                    total += n;
+                // 优化:offset==0 时不发 seek,省掉一次 SFTP round-trip。
+                // 整文件读取(预览/下载常见路径)就是 offset=0,这里直接从头读。
+                if offset > 0 {
+                    f.seek(SeekFrom::Start(offset)).await.map_err(io_err)?;
                 }
-                buf.truncate(total);
+                let mut buf = Vec::new();
+                AsyncReadExt::take(&mut f, len as u64)
+                    .read_to_end(&mut buf)
+                    .await
+                    .map_err(io_err)?;
                 Ok(buf)
             })
         })
@@ -299,6 +284,5 @@ impl SftpSession {
     }
 
     pub fn disconnect(&self) {
-        // Drop will close the channel; nothing extra needed for MVP.
     }
 }

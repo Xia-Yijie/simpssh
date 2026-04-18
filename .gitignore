@@ -10,3 +10,6 @@
 /android/app/build/
 /android/local.properties
 *.iml
+
+# Release 签名文件只保存在本机 / CI secrets 中,绝不进仓库
+/android/signing/

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider paths. "apks" is where we stage downloaded APKs so the
+     system PackageInstaller can read them via content:// URI. -->
+<paths>
+    <cache-path name="apks" path="apks/" />
+</paths>
