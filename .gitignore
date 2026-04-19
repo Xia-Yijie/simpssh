@@ -2,6 +2,20 @@
 /core/Cargo.lock
 .DS_Store
 *.swp
+/hostcard_snippet.txt
+
+# Desktop / Tauri
+/desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+/desktop/src-tauri/MicrosoftEdgeWebview2Setup.exe
+/desktop/*.log
+/desktop/*.tsbuildinfo
+
+# Local release artifacts
+/release/*
+!/release/.gitkeep
 
 # Gradle / Android (will appear once android/ subdir is added)
 .gradle/

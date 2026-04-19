@@ -75,6 +75,66 @@ The APK lands at `android/app/build/outputs/apk/debug/simpssh-<version>-debug.ap
 For a release build use `./gradlew assembleRelease` (unsigned; sign it
 yourself).
 
+## Building the Windows Desktop app
+
+The desktop app lives in `desktop/` and uses Tauri + Rust + React.
+
+### Prerequisites
+
+On Windows, make sure the following are installed first:
+
+- Rust toolchain (`cargo`, `rustc`)
+- Node.js + npm
+- Microsoft WebView2 runtime
+- NSIS (only needed for generating the installer)
+
+### Build the desktop executable
+
+```powershell
+cd desktop
+npm install
+npm run tauri build -- --no-bundle
+```
+
+This produces the desktop executable at:
+
+```text
+desktop/src-tauri/target/release/simpssh-desktop.exe
+```
+
+### Build the Windows installer
+
+```powershell
+cd desktop
+npm run dist:setup
+```
+
+This produces the installer at:
+
+```text
+release/simpssh_<version>_x64-setup.exe
+```
+
+### One-command release build
+
+```powershell
+cd desktop
+npm run release:windows
+```
+
+This will:
+
+1. build the Tauri desktop executable
+2. generate the NSIS installer
+3. copy the final artifacts into the repo-root `release/` directory
+
+Typical release artifacts:
+
+```text
+release/simpssh.exe
+release/simpssh_<version>_x64-setup.exe
+```
+
 ## Development commands
 
 ```sh
