@@ -70,6 +70,9 @@ class TabState(
     val expanded: SnapshotStateList<String> = mutableStateListOf()
 
     val title: String = (server.name.ifBlank { server.host }) + " · " + (script?.name ?: "默认")
+    // 用户在 tab 上长按改的会话名;空则回退 server.name。只存会话内,app 重启不保留。
+    var displayName: String by mutableStateOf("")
+    val shortTitle: String get() = displayName.ifBlank { server.name.ifBlank { server.host } }
 }
 
 class SessionManager(private val scope: CoroutineScope, private val ctx: Context) {
@@ -122,8 +125,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         }
     }
 
-    // 捕获 s/t 局部引用：重连会替换 tab.sshSession/tab.term，
-    // 防止本循环把已死会话的快照写进新会话的缓冲区。
+    // 局部 s/t:重连会替换 tab.sshSession/tab.term,防止旧循环写入新会话缓冲。
     private suspend fun runReader(tab: TabState, s: SshSession, t: TerminalView) {
         while (true) {
             val chunk = runCatching { s.read(SHELL_READ_TIMEOUT_MS) }.getOrNull() ?: break
@@ -179,8 +181,8 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         writeOnIo(tabId) { s -> s.write(bytes) }
     }
 
-    // Claude Code (Ink) 等 TUI 会缓冲连续输入，将其按 "up"/"down"/"tab"
-    // 等关键字整体匹配；在首字节后插入 [TYPING_GAP_MS] 间隔打断解析器合并。
+    // Claude Code (Ink) 等 TUI 会把连续字节整段匹配成 "up"/"tab" 等键名;
+    // 首字节后插入 TYPING_GAP_MS 间隔打断解析器合并。
     fun sendTyped(tabId: String, bytes: ByteArray) {
         if (bytes.isEmpty()) return
         writeOnIo(tabId) { s ->
@@ -194,7 +196,6 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         }
     }
 
-    // 写入必须在 IO 线程执行；任何异常触发重连。
     private inline fun writeOnIo(
         tabId: String,
         crossinline block: suspend (SshSession) -> Unit,
@@ -214,9 +215,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         return bytes.toString(Charsets.US_ASCII).lowercase() in KEYWORD_TRAP_SET
     }
 
-    // 批处理滚轮滚动：多次 delta 累积到 pendingScrollDelta，
-    // 单 worker 消费；scrollDisplay 返回 false 时跳过 snapshot，
-    // 让同一次手势里的多帧合并为一次渲染。
+    // 一次手势里多帧合并成一次 snapshot:scrollDisplay 返回 false 时跳过渲染。
     fun scrollTerminal(tabId: String, delta: Int) {
         val tab = tabs.firstOrNull { it.id == tabId } ?: return
         tab.pendingScrollDelta += delta
@@ -236,7 +235,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         }
     }
 
-    // 原地 diff：保持未变行的 Compose 身份，避免 LazyColumn 重建。
+    // 原地 diff:保留未变行的 Compose 身份,避免 LazyColumn 重建。
     private fun applySnapshotToTab(tab: TabState, snap: List<StyledRow>) {
         while (tab.rows.size > snap.size) {
             tab.rows.removeAt(tab.rows.lastIndex)
@@ -267,8 +266,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         tab.cols = cols
         tab.terminalRows = rows
         val s = tab.sshSession ?: return
-        // 合并 IME 滑动动画每帧约 16 次尺寸事件，
-        // 在末尾统一做一次 grid 调整 + SIGWINCH。
+        // IME 滑动动画每帧 ~16 次尺寸事件,合并成一次 grid 调整 + SIGWINCH。
         tab.pendingRemoteResize?.cancel()
         tab.pendingRemoteResize = scope.launch(Dispatchers.IO) {
             delay(REMOTE_RESIZE_COALESCE_MS)
@@ -332,6 +330,23 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         }
     }
 
+    /// 刷新 path 及其已展开的子目录;折叠子目录的缓存清掉,下次展开时重拉。
+    /// listDir 并发发起 —— russh-sftp 会在同一 channel 上多路复用。
+    suspend fun refreshDir(tab: TabState, path: String) {
+        val prefix = if (path == "/") "/" else "$path/"
+        val expandedUnder = tab.expanded.filter { it != path && it.startsWith(prefix) }
+        val expandedSet = expandedUnder.toSet()
+        withContext(Dispatchers.Main) {
+            val collapsedCached = tab.childrenByPath.keys
+                .filter { it != path && it.startsWith(prefix) && it !in expandedSet }
+            collapsedCached.forEach { tab.childrenByPath.remove(it) }
+        }
+        kotlinx.coroutines.coroutineScope {
+            launch { loadChildren(tab, path) }
+            for (p in expandedUnder) launch { loadChildren(tab, p) }
+        }
+    }
+
     suspend fun toggleExpand(tab: TabState, path: String) {
         if (tab.expanded.contains(path)) {
             withContext(Dispatchers.Main) { tab.expanded.remove(path) }
@@ -362,32 +377,127 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         }
     }
 
-    // 协作式取消：s.readFile 无法在调用中途中断，
-    // 但块之间的 ensureActive() 能在一个 chunk 边界内退出循环。
+    suspend fun statEntry(tab: TabState, path: String): DirEntry? {
+        val s = tab.sftp ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching { s.stat(path) }.getOrNull()
+        }
+    }
+
+    /// 部分字节不写缓存:key 由 entry.size 决定,半截写进去会在下次完整命中判断里被当整文件。
+    suspend fun readFileBytesCached(
+        tab: TabState,
+        entry: DirEntry,
+        max: Int = PREVIEW_MAX_BYTES,
+    ): ByteArray? {
+        val key = cache.keyFor(tab.server, entry)
+        cache.readAll(key, entry.size.toLong())?.let { return it }
+        val bytes = readFileBytes(tab, entry.path, max = max) ?: return null
+        if (bytes.size.toLong() == entry.size.toLong()) {
+            cache.writeAtomic(key, bytes)
+            cache.trim(SftpCache.MAX_CACHE_BYTES)
+        }
+        return bytes
+    }
+
+    internal fun newDownloadNotifier(): DownloadNotifier = DownloadNotifier(ctx)
+
+    /// s.readFile 本身不可打断,只能在块边界 ensureActive(),大文件才能按块退出。
     suspend fun streamFileTo(
         tab: TabState,
-        path: String,
+        entry: DirEntry,
         out: java.io.OutputStream,
         onProgress: (suspend (Long) -> Unit)? = null,
     ): Long {
         val s = tab.sftp ?: throw IllegalStateException("SFTP not connected")
+        // entry 可能来自过期的 listDir 快照;重 stat 避开 cache key 指向旧 .dat。
+        val live = statEntry(tab, entry.path) ?: entry
+        val key = cache.keyFor(tab.server, live)
+        val expected = live.size.toLong()
+
+        cache.completeFileOf(key, expected)?.let { cached ->
+            return withContext(Dispatchers.IO) {
+                cached.inputStream().use { pumpStream(it, out, 0L, onProgress) }
+            }
+        }
+
         return withContext(Dispatchers.IO) {
-            var total = 0L
-            while (true) {
-                ensureActive()
-                val chunk = s.readFile(path, total.toULong(), DOWNLOAD_CHUNK_BYTES.toUInt())
-                if (chunk.isEmpty()) break
-                out.write(chunk)
-                total += chunk.size
-                onProgress?.invoke(total)
-                if (chunk.size < DOWNLOAD_CHUNK_BYTES) break
+            val tmp = cache.tmpFile(key)
+            var total = tmp.length()
+            if (total > expected) { tmp.delete(); total = 0L }
+            // SAF 目标无法 seek,必须把已缓存段先重放给用户 out。
+            if (total > 0L) tmp.inputStream().use { pumpStream(it, out, 0L, onProgress, limit = total) }
+
+            java.io.FileOutputStream(tmp, /* append = */ true).use { cacheOut ->
+                while (true) {
+                    ensureActive()
+                    val chunk = readChunkWithRetry(s, live.path, total)
+                    if (chunk.isEmpty()) break
+                    out.write(chunk)
+                    cacheOut.write(chunk)
+                    total += chunk.size
+                    onProgress?.invoke(total)
+                    if (chunk.size < DOWNLOAD_CHUNK_BYTES) break
+                }
+            }
+
+            if (total == expected) {
+                tmp.renameTo(cache.finalFile(key))
+                cache.recordWrite(total)
+                cache.trim(SftpCache.MAX_CACHE_BYTES)
             }
             total
         }
     }
 
-    // 跑在 manager 的 scope 上，视图切换不打断操作。
-    // 先取消正在进行的操作；block 可捕获 CancellationException 做清理，但必须重抛。
+    private suspend fun pumpStream(
+        input: java.io.InputStream,
+        out: java.io.OutputStream,
+        startedAt: Long,
+        onProgress: (suspend (Long) -> Unit)?,
+        limit: Long = Long.MAX_VALUE,
+    ): Long {
+        val buf = ByteArray(DOWNLOAD_CHUNK_BYTES)
+        var copied = startedAt
+        var remaining = limit
+        while (remaining > 0L) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val want = minOf(buf.size.toLong(), remaining).toInt()
+            val n = input.read(buf, 0, want)
+            if (n <= 0) break
+            out.write(buf, 0, n)
+            copied += n
+            remaining -= n
+            onProgress?.invoke(copied)
+        }
+        return copied
+    }
+
+    private suspend fun readChunkWithRetry(
+        s: SftpSession,
+        path: String,
+        offset: Long,
+    ): ByteArray {
+        var attempt = 0
+        var lastErr: Throwable? = null
+        while (attempt < 3) {
+            try {
+                return s.readFile(path, offset.toULong(), DOWNLOAD_CHUNK_BYTES.toUInt())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                lastErr = e
+                attempt++
+                // russh 重连窗口
+                if (attempt < 3) delay(500L shl (attempt - 1))
+            }
+        }
+        throw lastErr ?: java.io.IOException("readFile failed (no error captured)")
+    }
+
+    private val cache: SftpCache by lazy { SftpCache(ctx) }
+
+    // scope 不随视图切换取消;block 捕 CancellationException 做清理后必须重抛。
     fun launchFileOp(tab: TabState, block: suspend () -> Unit): Job {
         tab.filesJob?.cancel()
         lateinit var newJob: Job

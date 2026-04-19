@@ -60,9 +60,11 @@ fun SettingsScreen(
     customPalettes: List<ThemePalette>,
     toolbarKeyIds: List<String>,
     showModeBadges: Boolean,
+    showMediaStats: Boolean,
     onThemeChange: (String) -> Unit,
     onToolbarKeysChange: (List<String>) -> Unit,
     onShowModeBadgesChange: (Boolean) -> Unit,
+    onShowMediaStatsChange: (Boolean) -> Unit,
     onAddCustom: () -> Unit,
     onEditCustom: (ThemePalette) -> Unit,
     onDeleteCustom: (ThemePalette) -> Unit,
@@ -116,6 +118,8 @@ fun SettingsScreen(
                 listState = devScroll,
                 showModeBadges = showModeBadges,
                 onShowModeBadgesChange = onShowModeBadgesChange,
+                showMediaStats = showMediaStats,
+                onShowMediaStatsChange = onShowMediaStatsChange,
             )
         }
     }
@@ -245,6 +249,8 @@ private fun DeveloperTab(
     listState: LazyListState,
     showModeBadges: Boolean,
     onShowModeBadgesChange: (Boolean) -> Unit,
+    showMediaStats: Boolean,
+    onShowMediaStatsChange: (Boolean) -> Unit,
 ) {
     LazyColumn(
         state = listState,
@@ -284,6 +290,29 @@ private fun DeveloperTab(
                         )
                     }
                     Switch(checked = showModeBadges, onCheckedChange = onShowModeBadgesChange)
+                }
+            }
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { onShowMediaStatsChange(!showMediaStats) },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("显示视频播放统计", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "在视频预览左上角叠加播放器状态和 SFTP DataSource 的 open/read/bytes 计数，用于排查卡顿。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
+                    Switch(checked = showMediaStats, onCheckedChange = onShowMediaStatsChange)
                 }
             }
         }

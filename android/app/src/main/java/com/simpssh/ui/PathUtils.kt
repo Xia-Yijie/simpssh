@@ -27,8 +27,8 @@ internal const val PREVIEW_MAX_BYTES: Int = 256 * 1024
 /// 图片会被解码为内存中的 `ImageBitmap`,此处限制是为了避免解码 OOM;
 /// 普通手机照片远低于这个上限。
 internal const val IMAGE_MAX_BYTES: Int = 32 * 1024 * 1024
-/// SFTP 每块读取大小;下载按块流式进行,因此这不是总大小上限。
-internal const val DOWNLOAD_CHUNK_BYTES: Int = 4 * 1024 * 1024
+/// 1 MB 和整数 MB 显示粒度对齐,进度条不会出现小数跳动。
+internal const val DOWNLOAD_CHUNK_BYTES: Int = 1024 * 1024
 internal const val TREE_INDENT_DP: Int = 16
 
 internal fun joinPath(base: String, name: String): String =

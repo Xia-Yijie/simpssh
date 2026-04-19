@@ -39,6 +39,8 @@ internal val BRACKETED_PASTE_END: ByteArray = "\u001B[201~".toByteArray(Standard
 
 @Suppress("LongParameterList")
 internal fun Modifier.terminalGestures(
+    // key 必须带 tab 身份:pointerInput(Unit) 会让协程复用首次 composition 捕获的 lambda。
+    key: Any,
     charW: () -> Float,
     charH: () -> Float,
     onLeftClick: (col: Int, row: Int) -> Unit,
@@ -51,12 +53,12 @@ internal fun Modifier.terminalGestures(
     onSelectionExtend: (col: Int, row: Int) -> Unit,
     onSelectionCommit: () -> Unit,
 ): Modifier = this
-    .pointerInput(Unit) {
+    .pointerInput(key) {
         detectTransformGestures(panZoomLock = false) { _, _, zoom, _ ->
             if (zoom != 1f) onPinch(zoom)
         }
     }
-    .pointerInput(Unit) {
+    .pointerInput(key) {
         awaitEachGesture {
             val w = charW(); val h = charH()
             if (w <= 0f || h <= 0f) return@awaitEachGesture
@@ -215,10 +217,8 @@ private suspend fun AwaitPointerEventScope.handleNonPinchGestures(
 
 private fun Offset.magnitude(): Float = sqrt(x * x + y * y)
 
-// Schmitt trigger 式的 cell 判定:光标恰好落在 cell 边界时,手指的微小抖动
-// 会让 raw.toInt() 在两个 cell 之间反复跳;用 last cell 中心 ± threshold 的滞回区
-// 吞掉这种抖动。threshold = 0.5 等价于原始边界(无滞回),越大越需要手指
-// 明确越过边界才切换 —— 与 AOSP TextView 文本选择的防抖手法一致。
+// Schmitt 触发式 cell 判定:手指在 cell 边界的微抖不来回跳 cell。
+// threshold 越大越需要手指明确越过边界才切换。
 internal fun cellWithHysteresis(raw: Float, last: Int, threshold: Float = 0.8f): Int {
     val clamped = raw.toInt().coerceAtLeast(0)
     if (last < 0) return clamped
@@ -226,9 +226,7 @@ internal fun cellWithHysteresis(raw: Float, last: Int, threshold: Float = 0.8f):
     return if (diff > threshold || diff < -threshold) clamped else last
 }
 
-// 行阈值比列大:行的像素高度大于列的像素宽度,但手指在 x/y 两轴的物理抖动
-// (毫米尺度)基本相当,于是同样的抖动对一个 cell 的占比,列比行大。列只用
-// 0.8 就能保持灵敏;行要求 ~1.1 cell 的刻意位移才切换,才能避免选择时跨行乱跳。
+// 行阈值更大:像素高度 > 列宽,但手指 x/y 抖动相近,所以同一抖动对行 cell 占比更小。
 internal const val ROW_HYSTERESIS_THRESHOLD = 1.1f
 
 private enum class Decided { UNDECIDED, HORIZONTAL, VERTICAL, LONG_PRESS }

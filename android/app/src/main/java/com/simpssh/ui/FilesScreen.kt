@@ -74,6 +74,9 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
     var pendingDownload by remember { mutableStateOf<DirEntry?>(null) }
     var pendingUploadDir by remember { mutableStateOf<String?>(null) }
     var gotoOpen by remember { mutableStateOf(false) }
+    var entryInfo by remember { mutableStateOf<DirEntry?>(null) }
+    var rootInfo by remember { mutableStateOf<DirEntry?>(null) }
+    var rootInfoLoading by remember { mutableStateOf(false) }
 
     val downloadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -158,6 +161,18 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                         leadingIcon = { NerdIcon(NerdGlyphs.CODE, null, size = 18.dp) },
                     )
                     DropdownMenuItem(
+                        text = { Text("文件信息") },
+                        onClick = {
+                            rootMenuOpen = false
+                            rootInfoLoading = true
+                            scope.launch {
+                                rootInfo = manager.statEntry(tab, tab.rootPath)
+                                rootInfoLoading = false
+                            }
+                        },
+                        leadingIcon = { NerdIcon(NerdGlyphs.INFO, null, size = 18.dp) },
+                    )
+                    DropdownMenuItem(
                         text = { Text("切换根路径") },
                         onClick = {
                             rootMenuOpen = false
@@ -169,7 +184,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                         text = { Text("刷新") },
                         onClick = {
                             rootMenuOpen = false
-                            scope.launch { manager.loadChildren(tab, tab.rootPath) }
+                            scope.launch { manager.refreshDir(tab, tab.rootPath) }
                         },
                         leadingIcon = { NerdIcon(NerdGlyphs.REFRESH, null, size = 18.dp) },
                     )
@@ -238,6 +253,9 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                                 uploadLauncher.launch(arrayOf("*/*"))
                             }
                         } else null,
+                        onRefresh = if (row.entry.isDir) {
+                            { scope.launch { manager.refreshDir(tab, row.entry.path) } }
+                        } else null,
                         onRename = { renameTarget = row.entry },
                         onDelete = {
                             scope.launch {
@@ -246,6 +264,7 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                                 else reportFilesError(tab, "删除", err)
                             }
                         },
+                        onInfo = { entryInfo = row.entry },
                     )
                 }
             }
@@ -253,6 +272,17 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
     }
 
     PreviewDialogs(preview = preview, sftp = tab.sftp) { preview = null }
+
+    entryInfo?.let { FileInfoDialog(it) { entryInfo = null } }
+    rootInfo?.let { FileInfoDialog(it) { rootInfo = null } }
+    if (rootInfoLoading && rootInfo == null) {
+        AlertDialog(
+            onDismissRequest = { rootInfoLoading = false },
+            confirmButton = { TextButton(onClick = { rootInfoLoading = false }) { Text("取消") } },
+            title = { Text("读取中…") },
+            text = { Text(tab.rootPath, fontFamily = FontFamily.Monospace) },
+        )
+    }
 
     mkdirInDir?.let { parent ->
         TextInputDialog(
@@ -385,11 +415,11 @@ private fun FilesStatusBanner(
 
 internal fun humanBytes(n: Long): String {
     if (n < 1024L) return "$n B"
-    val kb = n / 1024.0
-    if (kb < 1024.0) return "%.1f KB".format(kb)
-    val mb = kb / 1024.0
-    if (mb < 1024.0) return "%.1f MB".format(mb)
-    return "%.2f GB".format(mb / 1024.0)
+    val kb = n / 1024L
+    if (kb < 1024L) return "$kb KB"
+    val mb = kb / 1024L
+    if (mb < 1024L) return "$mb MB"
+    return "${mb / 1024L} GB"
 }
 
 @Composable
@@ -420,8 +450,10 @@ private fun TreeRowView(
     onDownload: (() -> Unit)?,
     onMkdirHere: (() -> Unit)?,
     onUploadHere: (() -> Unit)?,
+    onRefresh: (() -> Unit)?,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onInfo: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
@@ -473,6 +505,11 @@ private fun TreeRowView(
                     },
                     leadingIcon = { NerdIcon(NerdGlyphs.CODE, null, size = 18.dp) },
                 )
+                DropdownMenuItem(
+                    text = { Text("文件信息") },
+                    onClick = { menu = false; onInfo() },
+                    leadingIcon = { NerdIcon(NerdGlyphs.INFO, null, size = 18.dp) },
+                )
                 onMkdirHere?.let {
                     DropdownMenuItem(
                         text = { Text("在此处新建目录") },
@@ -485,6 +522,13 @@ private fun TreeRowView(
                         text = { Text("上传文件到此处") },
                         onClick = { menu = false; it() },
                         leadingIcon = { NerdIcon(NerdGlyphs.UPLOAD, null, size = 18.dp) },
+                    )
+                }
+                onRefresh?.let {
+                    DropdownMenuItem(
+                        text = { Text("刷新") },
+                        onClick = { menu = false; it() },
+                        leadingIcon = { NerdIcon(NerdGlyphs.REFRESH, null, size = 18.dp) },
                     )
                 }
                 onDownload?.let {
@@ -512,10 +556,81 @@ private fun TreeRowView(
 }
 
 @Composable
-private fun TextInputDialog(
+private fun FileInfoDialog(entry: DirEntry, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text(entry.name, maxLines = 1) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                InfoRow("类型", describeKind(entry))
+                InfoRow("路径", entry.path, monospace = true)
+                InfoRow("大小", "${humanBytes(entry.size.toLong())}  (${entry.size} 字节)")
+                InfoRow("修改时间", formatMtime(entry.mtime.toLong()))
+                InfoRow("权限", formatPermissions(entry.mode.toInt(), entry.isDir, entry.isLink))
+            }
+        },
+    )
+}
+
+@Composable
+private fun InfoRow(label: String, value: String, monospace: Boolean = false) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(
+            label,
+            modifier = Modifier.width(64.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+            ),
+        )
+    }
+}
+
+private fun describeKind(entry: DirEntry): String = when {
+    entry.isLink -> "符号链接"
+    entry.isDir -> "目录"
+    else -> "文件"
+}
+
+// SimpleDateFormat 非线程安全,但 formatMtime 只在 Main 用。
+private val MTIME_FORMATTER by lazy {
+    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+}
+
+private fun formatMtime(epochSeconds: Long): String {
+    if (epochSeconds <= 0L) return "未知"
+    return MTIME_FORMATTER.format(java.util.Date(epochSeconds * 1000L))
+}
+
+private fun formatPermissions(mode: Int, isDir: Boolean, isLink: Boolean): String {
+    val type = when {
+        isLink -> 'l'
+        isDir -> 'd'
+        else -> '-'
+    }
+    val bits = mode and 0xFFF
+    fun rwx(shift: Int): String {
+        val r = if (bits and (4 shl shift) != 0) 'r' else '-'
+        val w = if (bits and (2 shl shift) != 0) 'w' else '-'
+        val x = if (bits and (1 shl shift) != 0) 'x' else '-'
+        return "$r$w$x"
+    }
+    val symbolic = "$type${rwx(6)}${rwx(3)}${rwx(0)}"
+    val octal = String.format("%04o", bits)
+    return "$symbolic   $octal"
+}
+
+@Composable
+internal fun TextInputDialog(
     title: String,
     label: String,
     initial: String = "",
+    placeholder: String? = null,
     confirm: String,
     onCancel: () -> Unit,
     onConfirm: (String) -> Unit,
@@ -528,7 +643,10 @@ private fun TextInputDialog(
             OutlinedTextField(
                 value = v,
                 onValueChange = { v = it },
-                label = { Text(label) },
+                label = if (label.isNotEmpty()) {
+                    { Text(label) }
+                } else null,
+                placeholder = placeholder?.let { { Text(it) } },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -621,28 +739,42 @@ private fun streamWithProgress(
     onFailure: () -> Unit = {},
     onComplete: suspend (Long) -> Unit,
 ) {
+    val notifier = manager.newDownloadNotifier()
+    val notifId = DownloadNotifier.nextId()
+    val total0 = entry.size.toLong()
     manager.launchFileOp(tab) {
         withContext(Dispatchers.Main) {
             tab.filesStatus = initialStatus
-            tab.filesProgressTotal = entry.size.toLong()
+            tab.filesProgressTotal = total0
             tab.filesProgressDone = 0L
         }
+        notifier.progress(notifId, entry.name, 0L, total0)
+        // 500 ms 同时限流 UI 与系统通知;大文件按块下发会压爆 Main + NotificationManager。
+        var lastTick = System.currentTimeMillis()
         val total = try {
             openOutput().use { out ->
-                manager.streamFileTo(tab, entry.path, out) { done ->
-                    withContext(Dispatchers.Main) { tab.filesProgressDone = done }
+                manager.streamFileTo(tab, entry, out) { done ->
+                    val now = System.currentTimeMillis()
+                    val final = done == total0
+                    if (final || now - lastTick >= 500L) {
+                        lastTick = now
+                        withContext(Dispatchers.Main) { tab.filesProgressDone = done }
+                        notifier.progress(notifId, entry.name, done, total0)
+                    }
                 }
             }
         } catch (ce: CancellationException) {
             onFailure()
             withContext(NonCancellable + Dispatchers.Main) { tab.filesStatus = cancelledStatus }
-            // 必须重新抛出:launchFileOp 依赖 CancellationException 传播来识别取消,吞掉会让取消按钮失效。
+            notifier.cancel(notifId)
             throw ce
         } catch (e: Throwable) {
             onFailure()
             reportFilesError(tab, errorLabel, e)
+            notifier.error(notifId, entry.name, e.message ?: e.javaClass.simpleName)
             return@launchFileOp
         }
+        notifier.done(notifId, entry.name, total)
         onComplete(total)
     }
 }

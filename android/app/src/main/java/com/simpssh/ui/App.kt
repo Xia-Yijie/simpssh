@@ -43,6 +43,7 @@ fun App(crashReport: String? = null) {
     var toolbarKeyIds by remember { mutableStateOf(prefs.toolbarKeyIds) }
     var terminalFontSize by remember { mutableStateOf(prefs.terminalFontSize) }
     var showModeBadges by remember { mutableStateOf(prefs.showModeBadges) }
+    var showMediaStats by remember { mutableStateOf(prefs.showMediaStats) }
 
     fun reload() { servers = repo.load() }
 
@@ -51,6 +52,9 @@ fun App(crashReport: String? = null) {
     }
 
     SimpsshTheme(palette = palette) {
+      androidx.compose.runtime.CompositionLocalProvider(
+          LocalShowMediaStats provides showMediaStats,
+      ) {
         pendingCrash?.let { body ->
             CrashReportDialog(body = body, onDismiss = { pendingCrash = null })
         }
@@ -110,6 +114,7 @@ fun App(crashReport: String? = null) {
                     customPalettes = customPalettes,
                     toolbarKeyIds = toolbarKeyIds,
                     showModeBadges = showModeBadges,
+                    showMediaStats = showMediaStats,
                     onThemeChange = {
                         prefs.themeName = it
                         themeName = it
@@ -121,6 +126,10 @@ fun App(crashReport: String? = null) {
                     onShowModeBadgesChange = {
                         prefs.showModeBadges = it
                         showModeBadges = it
+                    },
+                    onShowMediaStatsChange = {
+                        prefs.showMediaStats = it
+                        showMediaStats = it
                     },
                     onAddCustom = { screen = Screen.CustomPaletteEdit(name = null) },
                     onEditCustom = { screen = Screen.CustomPaletteEdit(name = it.name) },
@@ -151,5 +160,6 @@ fun App(crashReport: String? = null) {
                 }
             }
         }
+      }
     }
 }

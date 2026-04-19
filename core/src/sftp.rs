@@ -2,10 +2,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::client;
+use russh_sftp::client::fs::File as SftpFile;
 use russh_sftp::client::SftpSession as SftpInner;
 use russh_sftp::protocol::{FileType, OpenFlags};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use tokio::runtime::Runtime;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::auth::AcceptAny;
 
@@ -91,7 +93,7 @@ async fn establish(args: &ConnectArgs) -> Result<(Arc<SftpInner>, client::Handle
 
 #[derive(uniffi::Object)]
 pub struct SftpSession {
-    runtime: Runtime,
+    runtime: Arc<Runtime>,
     sftp: Mutex<Arc<SftpInner>>,
     client: Mutex<Option<client::Handle<AcceptAny>>>,
     creds: ConnectArgs,
@@ -141,7 +143,7 @@ impl SftpSession {
         let creds = ConnectArgs { host, port, user, password };
         let (sftp, client) = rt.block_on(establish(&creds))?;
         Ok(Arc::new(Self {
-            runtime: rt,
+            runtime: Arc::new(rt),
             sftp: Mutex::new(sftp),
             client: Mutex::new(Some(client)),
             creds,
@@ -208,8 +210,7 @@ impl SftpSession {
             let path = path.clone();
             self.runtime.block_on(async move {
                 let mut f = sftp.open_with_flags(&path, OpenFlags::READ).await.map_err(io_err)?;
-                // 优化:offset==0 时不发 seek,省掉一次 SFTP round-trip。
-                // 整文件读取(预览/下载常见路径)就是 offset=0,这里直接从头读。
+                // offset==0 跳 seek(预览/下载常见路径)。
                 if offset > 0 {
                     f.seek(SeekFrom::Start(offset)).await.map_err(io_err)?;
                 }
@@ -283,6 +284,82 @@ impl SftpSession {
         })
     }
 
+    /// ExoPlayer 扫 MP4 头会发成千次小读;每次 open/seek/close 就是 3-4 个 round-trip,
+    /// 句柄复用后一次读一次 RTT。
+    pub fn open_file(&self, path: String) -> Result<Arc<OpenFile>, SftpError> {
+        self.retry_once(|| {
+            let sftp = self.current_sftp();
+            let path = path.clone();
+            self.runtime.block_on(async move {
+                sftp.open_with_flags(&path, OpenFlags::READ)
+                    .await
+                    .map_err(io_err)
+            })
+        })
+        .map(|f| {
+            Arc::new(OpenFile {
+                runtime: self.runtime.clone(),
+                inner: AsyncMutex::new(Some(OpenFileInner { file: f, cursor: 0 })),
+            })
+        })
+    }
+
     pub fn disconnect(&self) {
+    }
+}
+
+struct OpenFileInner {
+    file: SftpFile,
+    cursor: u64,
+}
+
+#[derive(uniffi::Object)]
+pub struct OpenFile {
+    runtime: Arc<Runtime>,
+    inner: AsyncMutex<Option<OpenFileInner>>,
+}
+
+#[uniffi::export]
+impl OpenFile {
+    pub fn read_at(&self, offset: u64, len: u32) -> Result<Vec<u8>, SftpError> {
+        self.runtime.block_on(async move {
+            let mut guard = self.inner.lock().await;
+            let st = guard
+                .as_mut()
+                .ok_or_else(|| SftpError::Io { msg: "file already closed".into() })?;
+            // cursor 跟踪避免顺序读场景下重复 seek(SFTP 层本地状态,但仍省一次 await)。
+            if st.cursor != offset {
+                st.file.seek(SeekFrom::Start(offset)).await.map_err(io_err)?;
+                st.cursor = offset;
+            }
+            let mut buf = Vec::with_capacity(len as usize);
+            AsyncReadExt::take(&mut st.file, len as u64)
+                .read_to_end(&mut buf)
+                .await
+                .map_err(io_err)?;
+            st.cursor = offset + buf.len() as u64;
+            Ok(buf)
+        })
+    }
+
+    pub fn release(&self) {
+        self.runtime.block_on(async move {
+            if let Some(mut st) = self.inner.lock().await.take() {
+                let _ = st.file.shutdown().await;
+            }
+        });
+    }
+}
+
+impl Drop for OpenFile {
+    // 多数 SFTP server 每 session 只允许 8~10 个打开文件,漏关很快卡死。
+    fn drop(&mut self) {
+        let inner = std::mem::replace(&mut self.inner, AsyncMutex::new(None));
+        let rt = self.runtime.clone();
+        rt.spawn(async move {
+            if let Some(mut st) = inner.lock().await.take() {
+                let _ = st.file.shutdown().await;
+            }
+        });
     }
 }

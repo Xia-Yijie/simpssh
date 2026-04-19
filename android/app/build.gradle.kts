@@ -24,8 +24,8 @@ android {
         applicationId = "com.simpssh"
         minSdk = 26
         targetSdk = 34
-        versionCode = 35
-        versionName = "0.5.0"
+        versionCode = 58
+        versionName = "0.6.13"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -43,6 +43,13 @@ android {
     }
 
     buildTypes {
+        // debug 包名 + `.debug` 后缀,版本名加 `-debug` 标记 —— 这样 CI 产出的
+        // debug APK 跟正式 release APK 签名不同时也能并排安装,不会因为
+        // INSTALL_FAILED_UPDATE_INCOMPATIBLE 拒装。FileProvider authority
+        // 在 Manifest 里走 `${applicationId}.fileprovider`,自动跟随 suffix。
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+        }
         getByName("release") {
             // R8/minify 关掉:uniffi + JNA 依赖反射,开启会丢 symbol 触发运行时
             // NoSuchMethodError;要启用需要补一份保留规则。

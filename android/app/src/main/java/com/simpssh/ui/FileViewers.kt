@@ -68,6 +68,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import coil.request.ImageRequest
 import me.saket.telephoto.zoomable.coil.ZoomableAsyncImage
+import uniffi.simpssh_core.OpenFile
 import uniffi.simpssh_core.SftpSession
 
 internal sealed class PreviewKind {
@@ -98,25 +99,25 @@ internal suspend fun openFilePreview(
     tab: TabState,
     entry: uniffi.simpssh_core.DirEntry,
 ): PreviewKind? {
-    val ext = entry.name.substringAfterLast('.', "").lowercase()
+    // 目录快照可能过时;重新 stat 避开 SftpCache key 指向旧版本 → 命中旧缓存读老内容。
+    val fresh = manager.statEntry(tab, entry.path) ?: entry
+    val ext = fresh.name.substringAfterLast('.', "").lowercase()
     return when {
         ext in IMAGE_EXT -> {
-            // 图片必须读完整文件才能解码,PREVIEW_MAX_BYTES(256 KB)会把照片截断;
-            // 这里用文件实际大小,再用 IMAGE_MAX_BYTES 封顶,防止超大图把解码器 OOM。
-            val cap = minOf(entry.size.toLong(), IMAGE_MAX_BYTES.toLong()).toInt()
-            val bytes = manager.readFileBytes(tab, entry.path, max = cap) ?: return null
-            PreviewKind.Image(entry.path, bytes)
+            // 图片需整文件解码;封顶 IMAGE_MAX_BYTES 防 OOM。
+            val cap = minOf(fresh.size.toLong(), IMAGE_MAX_BYTES.toLong()).toInt()
+            val bytes = manager.readFileBytesCached(tab, fresh, max = cap) ?: return null
+            PreviewKind.Image(fresh.path, bytes)
         }
-        ext in MEDIA_EXT -> PreviewKind.Media(entry.path, entry.size.toLong())
+        ext in MEDIA_EXT -> PreviewKind.Media(fresh.path, fresh.size.toLong())
         else -> {
-            val bytes = manager.readFileBytes(tab, entry.path) ?: return null
-            val name = entry.name.lowercase()
-            // 先按整文件名(如 Makefile、Dockerfile)再按后缀:这类无扩展名的文件
-            // 通常不具备可靠后缀,必须优先走文件名表才能命中。
+            val bytes = manager.readFileBytesCached(tab, fresh) ?: return null
+            val name = fresh.name.lowercase()
+            // 文件名优先于后缀:Makefile / Dockerfile 等无扩展名文件靠后缀永远命不中。
             val lang = CODE_LANGUAGE_BY_FILENAME[name]
                 ?: CODE_LANGUAGE_BY_EXT[ext]
                 ?: LANG_PLAIN
-            PreviewKind.Code(entry.path, decodeText(bytes), lang)
+            PreviewKind.Code(fresh.path, decodeText(bytes), lang)
         }
     }
 }
@@ -261,7 +262,6 @@ private fun LanguagePickerMenu(
     onPick: (LangSpec) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // 以 expanded 作为 remember 的 key:每次菜单重新打开时重建状态,搜索框自动清空。
     var query by remember(expanded) { mutableStateOf("") }
     DropdownMenu(
         expanded = expanded,
@@ -338,9 +338,6 @@ private fun sliceLines(
     if (end > start) annotated.subSequence(start, end) else AnnotatedString("")
 }
 
-// 以"逻辑行"为粒度交给 LazyColumn 渲染。Alignment.Top 让行号钉在每个逻辑行的
-// 第一条可视行上:开启自动换行后,同一逻辑行折成多行时,行号只出现在顶部,右
-// 侧折下去的子行不再编号——与 VSCode / IntelliJ 的软换行行为一致。
 @Composable
 private fun CodeBody(
     text: String,
@@ -360,8 +357,7 @@ private fun CodeBody(
         }
         starts
     }
-    // 预先切成逐行 AnnotatedString,LazyColumn 绘制时只做一次下标取值;否则每个
-    // 可见行都要对整串调用 subSequence,代价是 O(spans)。
+    // 预切 per-line AnnotatedString,避免每个可见行都对整串 subSequence(O(spans))。
     val plainSlices = remember(text, lineCount) {
         sliceLines(AnnotatedString(text), text, lineStarts, lineCount)
     }
@@ -495,6 +491,21 @@ private fun ImagePreviewDialog(preview: PreviewKind.Image, onDismiss: () -> Unit
     }
 }
 
+// DefaultMediaSourceFactory 不介入即可,内容由 SftpDataSource 喂。
+private val MEDIA_PLACEHOLDER_URI: Uri = Uri.parse("sftp://simpssh/media")
+
+// 防环形 cause 链。
+private fun rootCauseOf(e: Throwable, maxDepth: Int = 16): Throwable {
+    val seen = java.util.IdentityHashMap<Throwable, Unit>()
+    var cur = e
+    repeat(maxDepth) {
+        val next = cur.cause ?: return cur
+        if (seen.put(cur, Unit) != null) return cur
+        cur = next
+    }
+    return cur
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 private fun MediaPreviewDialog(
@@ -506,41 +517,211 @@ private fun MediaPreviewDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        val ctx = LocalContext.current
+        val showStats = LocalShowMediaStats.current
+        var isFullscreen by remember { mutableStateOf(false) }
+        // FULL_SENSOR 无视系统旋转锁;依赖 MainActivity 的 configChanges=orientation 不重建 Activity。
+        DisposableEffect(preview.path) {
+            val activity = ctx as? android.app.Activity
+            val prev = activity?.requestedOrientation
+            activity?.requestedOrientation =
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            onDispose {
+                activity?.requestedOrientation = prev
+                    ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        }
+        LaunchedEffect(isFullscreen) {
+            val activity = ctx as? android.app.Activity ?: return@LaunchedEffect
+            activity.requestedOrientation = if (isFullscreen) {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            }
+        }
+        DisposableEffect(isFullscreen) {
+            val activity = ctx as? android.app.Activity
+            val window = activity?.window
+            val controller = window?.let {
+                androidx.core.view.WindowInsetsControllerCompat(it, it.decorView)
+            }
+            if (isFullscreen) {
+                controller?.systemBarsBehavior =
+                    androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+            onDispose {
+                controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = Color.Black,
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                PreviewTitleBar(preview.path, onDismiss, light = true)
-                val ctx = LocalContext.current
+                if (!isFullscreen) PreviewTitleBar(preview.path, onDismiss, light = true)
+                var error by remember(preview.path) { mutableStateOf<String?>(null) }
+                var stateLabel by remember(preview.path) { mutableStateOf("IDLE") }
+                var playing by remember(preview.path) { mutableStateOf(false) }
+                var curMs by remember(preview.path) { mutableStateOf(0L) }
+                var durMs by remember(preview.path) { mutableStateOf(0L) }
+                var buffered by remember(preview.path) { mutableStateOf(0L) }
+                var statsLine by remember(preview.path) { mutableStateOf("") }
+                LaunchedEffect(preview.path) { SftpDataSourceStats.reset() }
                 val player = remember(preview.path, preview.size) {
                     val factory = DataSource.Factory { SftpDataSource(sftp, preview.path, preview.size) }
+                    // ExoPlayer 默认 50s 才起播,SFTP 慢时卡 BUFFERING;激进缓冲 1.5s 起播,上限 15s。
+                    val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                        .setBufferDurationsMs(5_000, 15_000, 1_500, 3_000)
+                        .build()
                     ExoPlayer.Builder(ctx)
-                        .setMediaSourceFactory(
-                            DefaultMediaSourceFactory(ctx)
-                                .setDataSourceFactory(factory),
-                        )
+                        .setLoadControl(loadControl)
                         .build()
                         .apply {
-                            val uri = Uri.parse("sftp://internal${preview.path}")
-                            setMediaSource(
-                                ProgressiveMediaSource.Factory(factory)
-                                    .createMediaSource(MediaItem.fromUri(uri)),
-                            )
+                            // ProgressiveMediaSource 从内容嗅探;换 setMediaItem 遇无后缀 URI 会永卡 IDLE。
+                            val source = ProgressiveMediaSource.Factory(factory)
+                                .createMediaSource(MediaItem.fromUri(MEDIA_PLACEHOLDER_URI))
+                            setMediaSource(source)
                             prepare()
                             playWhenReady = true
                         }
                 }
                 DisposableEffect(player) {
-                    onDispose { player.release() }
+                    val listener = object : androidx.media3.common.Player.Listener {
+                        override fun onPlayerError(e: androidx.media3.common.PlaybackException) {
+                            val root = rootCauseOf(e)
+                            error = buildString {
+                                append(e.errorCodeName).append(": ").append(e.message ?: "")
+                                if (root !== e) {
+                                    append("\n→ ").append(root.javaClass.simpleName)
+                                        .append(": ").append(root.message ?: "")
+                                }
+                            }
+                        }
+                        override fun onIsPlayingChanged(isPlaying: Boolean) {
+                            playing = isPlaying
+                        }
+                        override fun onPlaybackStateChanged(state: Int) {
+                            if (!showStats) return
+                            stateLabel = when (state) {
+                                androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                                androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                                androidx.media3.common.Player.STATE_READY -> "READY"
+                                androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                                else -> "?"
+                            }
+                        }
+                    }
+                    player.addListener(listener)
+                    onDispose {
+                        player.removeListener(listener)
+                        player.release()
+                    }
                 }
-                AndroidView(
-                    factory = { PlayerView(it).apply { this.player = player } },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                // currentPosition / bufferedPosition 没有 listener 推送,只能轮询。
+                LaunchedEffect(player, showStats) {
+                    while (true) {
+                        val nc = player.currentPosition
+                        if (nc != curMs) curMs = nc
+                        val nd = player.duration
+                        if (nd != durMs) durMs = nd
+                        val nb = player.bufferedPosition
+                        if (nb != buffered) buffered = nb
+                        if (showStats) {
+                            val s = SftpDataSourceStats
+                            val line = "DS: open=${s.opens} read=${s.reads} close=${s.closes} bytes=${humanBytes(s.bytes)}"
+                            if (line != statsLine) statsLine = line
+                        }
+                        kotlinx.coroutines.delay(250)
+                    }
+                }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AndroidView(
+                        factory = {
+                            PlayerView(it).apply {
+                                this.player = player
+                                useController = true
+                                controllerShowTimeoutMs = 3_000
+                                controllerHideOnTouch = true
+                                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                                setShowPreviousButton(false)
+                                setShowNextButton(false)
+                                setShowShuffleButton(false)
+                                setShowSubtitleButton(false)
+                                setFullscreenButtonClickListener { next ->
+                                    isFullscreen = next
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    if (showStats) {
+                        Surface(
+                            color = Color(0xCC000000),
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp),
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                Text(
+                                    text = buildString {
+                                        append(stateLabel)
+                                        if (playing) append(" · PLAYING")
+                                        if (durMs > 0) {
+                                            append("   ")
+                                            append(formatMs(curMs)).append(" / ").append(formatMs(durMs))
+                                            append("   缓冲 ").append(formatMs(buffered))
+                                        }
+                                    },
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                Text(
+                                    text = statsLine,
+                                    color = Color(0xFFBBBBBB),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                SftpDataSourceStats.lastError?.let {
+                                    Text(
+                                        text = "SFTP 错误: $it",
+                                        color = Color(0xFFFF8888),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    error?.let { msg ->
+                        Surface(
+                            color = Color(0xCC800000),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                        ) {
+                            Text(
+                                msg,
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+private fun formatMs(ms: Long): String {
+    if (ms < 0) return "--:--"
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 @Composable
@@ -567,9 +748,8 @@ private fun PreviewTitleBar(path: String, onDismiss: () -> Unit, light: Boolean 
     }
 }
 
-// ExoPlayer 在其 loader 线程上调用 read() 拉字节,所以这里必须是同步接口;
-// uniffi 的 SftpSession.readFile(path, offset, len) 本身就是阻塞调用,正好匹配
-// DataSource.read 的契约——不需要再包一层协程。
+// MP4 extractor 会做几千次 8~4 KB 小读;open() 拿句柄,read() 从 PREFETCH_BYTES
+// 的本地缓冲吃,miss 才打一次 SFTP READ —— 把几千个小 RTT 合成几百个 1 MB RTT。
 @UnstableApi
 private class SftpDataSource(
     private val sftp: SftpSession,
@@ -579,7 +759,10 @@ private class SftpDataSource(
     private var position: Long = 0
     private var remaining: Long = 0
     private var openedUri: Uri? = null
-    private var opened: Boolean = false
+    private var handle: OpenFile? = null
+    private val prefetch = ByteArray(PREFETCH_BYTES)
+    private var prefetchStart: Long = 0
+    private var prefetchLen: Int = 0
 
     override fun open(dataSpec: DataSpec): Long {
         openedUri = dataSpec.uri
@@ -587,38 +770,75 @@ private class SftpDataSource(
         position = dataSpec.position
         remaining = if (dataSpec.length == C.LENGTH_UNSET.toLong()) totalSize - position
         else dataSpec.length
-        opened = true
+        prefetchStart = 0
+        prefetchLen = 0
+        handle = try {
+            sftp.openFile(remotePath)
+        } catch (e: Throwable) {
+            SftpDataSourceStats.lastError = "open: ${e.javaClass.simpleName}: ${e.message}"
+            throw java.io.IOException("sftp openFile failed: ${e.message}", e)
+        }
         transferStarted(dataSpec)
+        SftpDataSourceStats.opens++
         return remaining
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         if (length == 0) return 0
         if (remaining == 0L) return C.RESULT_END_OF_INPUT
-        val chunk = minOf(length.toLong(), remaining).coerceAtMost(CHUNK_BYTES).toInt()
-        val fetched = try {
-            sftp.readFile(remotePath, position.toULong(), chunk.toUInt())
-        } catch (e: Throwable) {
-            throw java.io.IOException("sftp readFile failed: ${e.message}", e)
+        val h = handle ?: throw java.io.IOException("sftp data source not opened")
+
+        if (position < prefetchStart || position >= prefetchStart + prefetchLen) {
+            val want = minOf(PREFETCH_BYTES.toLong(), remaining).toInt()
+            SftpDataSourceStats.reads++
+            val fetched = try {
+                h.readAt(position.toULong(), want.toUInt())
+            } catch (e: Throwable) {
+                SftpDataSourceStats.lastError = "${e.javaClass.simpleName}: ${e.message}"
+                throw java.io.IOException("sftp readAt failed: ${e.message}", e)
+            }
+            if (fetched.isEmpty()) return C.RESULT_END_OF_INPUT
+            System.arraycopy(fetched, 0, prefetch, 0, fetched.size)
+            prefetchStart = position
+            prefetchLen = fetched.size
+            SftpDataSourceStats.bytes += fetched.size
         }
-        if (fetched.isEmpty()) return C.RESULT_END_OF_INPUT
-        System.arraycopy(fetched, 0, buffer, offset, fetched.size)
-        position += fetched.size
-        remaining -= fetched.size
-        bytesTransferred(fetched.size)
-        return fetched.size
+
+        val bufIdx = (position - prefetchStart).toInt()
+        val avail = prefetchLen - bufIdx
+        val toCopy = minOf(length, avail).coerceAtMost(remaining.toInt())
+        System.arraycopy(prefetch, bufIdx, buffer, offset, toCopy)
+        position += toCopy
+        remaining -= toCopy
+        bytesTransferred(toCopy)
+        return toCopy
     }
 
     override fun getUri(): Uri? = openedUri
 
     override fun close() {
-        if (opened) {
-            opened = false
+        handle?.let {
+            runCatching { it.release() }
+            runCatching { it.close() }
+            handle = null
+            prefetchLen = 0
             transferEnded()
+            SftpDataSourceStats.closes++
         }
     }
 
     companion object {
-        private const val CHUNK_BYTES = 256L * 1024L
+        private const val PREFETCH_BYTES = 1024 * 1024
+    }
+}
+
+internal object SftpDataSourceStats {
+    @Volatile var opens: Int = 0
+    @Volatile var reads: Int = 0
+    @Volatile var closes: Int = 0
+    @Volatile var bytes: Long = 0
+    @Volatile var lastError: String? = null
+    fun reset() {
+        opens = 0; reads = 0; closes = 0; bytes = 0; lastError = null
     }
 }

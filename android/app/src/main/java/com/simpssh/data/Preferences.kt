@@ -33,6 +33,10 @@ class PreferencesRepository(context: Context) {
         get() = prefs.getBoolean(KEY_MODE_BADGES, false)
         set(v) { prefs.edit().putBoolean(KEY_MODE_BADGES, v).apply() }
 
+    var showMediaStats: Boolean
+        get() = prefs.getBoolean(KEY_MEDIA_STATS, false)
+        set(v) { prefs.edit().putBoolean(KEY_MEDIA_STATS, v).apply() }
+
     var toolbarKeyIds: List<String>
         get() {
             val raw = prefs.getString(KEY_TOOLBAR, null) ?: return DefaultToolbarKeyIds
@@ -95,6 +99,7 @@ class PreferencesRepository(context: Context) {
         const val KEY_TOOLBAR = "toolbar_keys"
         const val KEY_FONT_SIZE = "terminal_font_size"
         const val KEY_MODE_BADGES = "show_mode_badges"
+        const val KEY_MEDIA_STATS = "show_media_stats"
     }
 }
 

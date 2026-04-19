@@ -5,7 +5,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.offset
@@ -65,6 +67,8 @@ import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -102,7 +106,7 @@ import androidx.compose.ui.unit.sp
 import java.nio.charset.StandardCharsets
 import uniffi.simpssh_core.StyledRow
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SessionsScreen(
     manager: SessionManager,
@@ -118,6 +122,11 @@ fun SessionsScreen(
     LaunchedEffect(manager.tabs.size) {
         if (manager.tabs.isEmpty()) onHome()
     }
+
+    // 切 tab 时强制收键盘,避免新 tab 继承旧 tab 的 shrunk viewport + IME 动画被打断。
+    val imeController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(activeId) { imeController?.hide() }
+
 
     val window = (androidx.compose.ui.platform.LocalContext.current as? android.app.Activity)?.window
     androidx.compose.runtime.DisposableEffect(Unit) {
@@ -168,6 +177,8 @@ private fun CompactTopBar(
     onSetView: (TabState.View) -> Unit,
 ) {
     val activeId = activeTab?.id
+    var menuTabId by remember { mutableStateOf<String?>(null) }
+    var renameTabId by remember { mutableStateOf<String?>(null) }
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
         Row(
             modifier = Modifier
@@ -188,12 +199,33 @@ private fun CompactTopBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 tabs.forEach { t ->
-                    CompactTab(
-                        title = t.title,
-                        selected = t.id == activeId,
-                        onClick = { onActivate(t.id) },
-                        onClose = { onClose(t.id) },
-                    )
+                    Box {
+                        CompactTab(
+                            title = t.shortTitle,
+                            selected = t.id == activeId,
+                            onClick = { onActivate(t.id) },
+                            onLongPress = { menuTabId = t.id },
+                        )
+                        DropdownMenu(
+                            expanded = menuTabId == t.id,
+                            onDismissRequest = { menuTabId = null },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("修改会话名") },
+                                onClick = {
+                                    menuTabId = null
+                                    renameTabId = t.id
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("关闭") },
+                                onClick = {
+                                    menuTabId = null
+                                    onClose(t.id)
+                                },
+                            )
+                        }
+                    }
                 }
             }
             if (activeTab != null) {
@@ -212,14 +244,30 @@ private fun CompactTopBar(
             }
         }
     }
+    val renamingTab = tabs.firstOrNull { it.id == renameTabId }
+    if (renamingTab != null) {
+        TextInputDialog(
+            title = "修改会话名",
+            label = "",
+            initial = renamingTab.displayName,
+            placeholder = renamingTab.server.name.ifBlank { renamingTab.server.host },
+            confirm = "保存",
+            onCancel = { renameTabId = null },
+            onConfirm = {
+                renamingTab.displayName = it
+                renameTabId = null
+            },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CompactTab(
     title: String,
     selected: Boolean,
     onClick: () -> Unit,
-    onClose: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
     val fg = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
@@ -228,26 +276,18 @@ private fun CompactTab(
         modifier = Modifier
             .clip(MaterialTheme.shapes.small)
             .background(bg)
-            .clickable(onClick = onClick)
-            .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .heightIn(min = 32.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             title,
             color = fg,
             style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
         )
-        Spacer(Modifier.width(2.dp))
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .clip(MaterialTheme.shapes.small)
-                .clickable(onClick = onClose),
-            contentAlignment = Alignment.Center,
-        ) {
-            NerdIcon(NerdGlyphs.TIMES, "关闭", size = 12.dp, tint = fg)
-        }
     }
 }
 
@@ -309,14 +349,15 @@ private fun ShellBody(
     showModeBadges: Boolean,
     onSendBytes: (ByteArray) -> Unit,
 ) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(tab.rows.size, tab.rows.lastOrNull()?.text) {
+    val listState = remember(tab.id) { androidx.compose.foundation.lazy.LazyListState() }
+    LaunchedEffect(tab.id, tab.rows.size, tab.rows.lastOrNull()?.text) {
         if (tab.rows.isNotEmpty()) {
             runCatching { listState.scrollToItem(tab.rows.lastIndex) }
         }
     }
 
-    val focusReq = remember { FocusRequester() }
+    // key(tab.id): 切 tab 后 toolbar 的 show-keyboard 必须绑到新 tab 的 TextField。
+    val focusReq = remember(tab.id) { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val mods = remember(tab.id) { ModifierState() }
     var shadow by remember(tab.id) { mutableStateOf(TextFieldValue("")) }
@@ -410,7 +451,7 @@ private fun ShellBody(
         }
 
         var contentSize by remember(tab.id) { mutableStateOf(IntSize.Zero) }
-        // derivedStateOf 把重组门控在整数边界跨越上,避免 IME 动画的逐像素变化每帧都重组整个 ShellBody。
+        // 重组只在整数 cell 边界跨越时触发,IME 动画逐像素变化不会每帧重组 ShellBody。
         val cols by remember(charW) {
             derivedStateOf {
                 // -1 吸收亚像素布局松弛,否则最右一格会被 `clipToBounds` 裁掉。
@@ -422,8 +463,9 @@ private fun ShellBody(
                 if (charH > 0f) (contentSize.height / charH).toInt() else 0
             }
         }
-        if (cols >= 20 && rows >= 5) {
-            LaunchedEffect(cols, rows) {
+        LaunchedEffect(cols, rows) {
+            // 初次测量可能给出极小值(布局 pass 还没跑完);给 pty 发这种尺寸没意义。
+            if (cols >= 20 && rows >= 5) {
                 manager.resizeTerminal(tab.id, cols.toUShort(), rows.toUShort())
             }
         }
@@ -431,7 +473,7 @@ private fun ShellBody(
         val ctx = androidx.compose.ui.platform.LocalContext.current
         val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
         val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-        // 用 rememberUpdatedState 实时读取:捏合缩放时更新 cell 映射,又不会把 `pointerInput` 的 key 换掉中断手势。
+        // live-read:缩放更新映射但不重启 pointerInput 协程。
         val charWLatest by androidx.compose.runtime.rememberUpdatedState(charW)
         val charHLatest by androidx.compose.runtime.rememberUpdatedState(charH)
         val fontSizeLatest by androidx.compose.runtime.rememberUpdatedState(fontSize)
@@ -442,6 +484,7 @@ private fun ShellBody(
                 .padding(TERM_PAD)
                 .clipToBounds()
                 .terminalGestures(
+                    key = tab.id,
                     charW = { charWLatest },
                     charH = { charHLatest },
                     onLeftClick = { col, row ->
@@ -706,7 +749,7 @@ private fun GroupSeparator() {
     )
 }
 
-// 把 `WindowInsets.ime` 的读取隔离到单独的 composable 里,避免 IME 动画过程中每帧 inset 变化都让整个工具栏失效重组。
+// 隔离 WindowInsets.ime 读取,避免 IME 动画逐帧触发整条工具栏重组。
 @Composable
 private fun RightSlot(
     overflowOpen: Boolean,
@@ -792,7 +835,6 @@ private fun ToolKey(
     }
 }
 
-// 点按键后面板保持打开,便于用户连按多个按键。
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun InlineOverflowPanel(
@@ -952,9 +994,7 @@ private fun TerminalRowCanvas(
     ) {
         val cursorCell = cursorOffset?.let { textOffsetToCellIndex(row.text, it) }
 
-        // 绘制顺序是 bg → 选区高亮 → 光标 → 文字。先前把选区 rect 放在
-        // cell 自定义背景之前,带底色的 cell(例如 ANSI 着色的行)会把选区
-        // 覆盖成看不见。现在选区以 alpha 叠加在所有背景之上。
+        // 绘制顺序 bg → 选区 → 光标 → 文字:选区必须叠在 cell 背景之上,否则 ANSI 着色行会盖住选区。
         var cellX = 0f
         for (glyph in glyphs) {
             if (cellX >= size.width) break
@@ -1069,7 +1109,6 @@ private fun StyledRow.styleAt(offset: Int, themeFg: Color, themeBg: Color): Span
     )
 }
 
-// anchor 是长按开始处,end 随拖动移动;坐标为可见视图里基于 0 的 cell 索引。
 internal data class TerminalSelection(
     val anchorRow: Int,
     val anchorCol: Int,

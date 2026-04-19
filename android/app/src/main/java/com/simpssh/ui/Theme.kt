@@ -84,6 +84,7 @@ fun resolvePalette(name: String, custom: List<ThemePalette> = emptyList()): Them
         ?: BuiltInPalettes.first()
 
 val LocalPalette = staticCompositionLocalOf { BuiltInPalettes.first() }
+val LocalShowMediaStats = staticCompositionLocalOf { false }
 
 private fun lightSchemeFor(p: ThemePalette): ColorScheme = lightColorScheme(
     primary = p.primary,
