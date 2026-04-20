@@ -1,21 +1,86 @@
+mod cache;
+
 use std::collections::HashMap;
+use std::fs;
+use std::io::{Read, Write};
 use std::str;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
+
+use cache::{SftpCache, MAX_CACHE_BYTES};
 
 use serde::{Deserialize, Serialize};
 use simpssh_core::{DirEntry, SftpSession, SshSession};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+const DOWNLOAD_CHUNK: u32 = 1024 * 1024;
+const EV_CHUNK: &str = "download-chunk";
+const EV_DONE: &str = "download-done";
+const EV_ERROR: &str = "download-error";
+const EV_CANCELLED: &str = "download-cancelled";
+
 #[derive(Default)]
 struct SessionStore {
-    sessions: Arc<Mutex<HashMap<String, ManagedSession>>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<ManagedSession>>>>,
+}
+
+#[derive(Default)]
+struct DownloadStore {
+    map: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+}
+
+#[derive(Default)]
+struct CacheState {
+    cache: OnceLock<Arc<SftpCache>>,
+}
+
+impl CacheState {
+    fn get(&self) -> Result<Arc<SftpCache>, String> {
+        if let Some(c) = self.cache.get() {
+            return Ok(c.clone());
+        }
+        let fresh = SftpCache::new(SftpCache::default_root())
+            .map(Arc::new)
+            .map_err(|e| format!("init cache dir failed: {e}"))?;
+        // Ok(_) 表示这个调用者的 fresh 进了 OnceLock;Err(_) 表示被别的线程抢先,
+        // 此时 fresh 被丢,取里面那份。两种情况都 unwrap() 拿到稳定的 Arc。
+        let _ = self.cache.set(fresh);
+        Ok(self.cache.get().unwrap().clone())
+    }
 }
 
 struct ManagedSession {
     ssh: Arc<SshSession>,
     sftp: Arc<SftpSession>,
+    host: String,
+    user: String,
+}
+
+/// 锁内只 clone Arc,IO 在锁外做,否则一个大 SFTP 调用会阻塞其他 session 的所有 command。
+fn get_session(
+    state: &State<'_, SessionStore>,
+    session_id: &str,
+) -> Result<Arc<ManagedSession>, String> {
+    state
+        .sessions
+        .lock()
+        .unwrap()
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| "session not found".to_string())
+}
+
+/// 把 `spawn_blocking(move || ...).await.map_err(..)?` 的样板收成一个函数。
+async fn blocking<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +132,29 @@ struct SshOutputEvent {
 #[serde(rename_all = "camelCase")]
 struct SessionMessageEvent {
     session_id: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadChunkEvent {
+    download_id: String,
+    offset: u64,
+    total: u64,
+    bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadDoneEvent {
+    download_id: String,
+    total: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadErrorEvent {
+    download_id: String,
     message: String,
 }
 
@@ -126,25 +214,18 @@ async fn connect_session(
 
         sessions.lock().unwrap().insert(
             session_id.clone(),
-            ManagedSession {
+            Arc::new(ManagedSession {
                 ssh: ssh.clone(),
                 sftp,
-            },
+                host: request.host.clone(),
+                user: request.user.clone(),
+            }),
         );
 
-        spawn_reader(app, sessions.clone(), session_id.clone(), ssh);
+        spawn_reader(app, sessions.clone(), session_id.clone(), ssh.clone());
 
         if let Some(script) = request.init_script.as_ref() {
-            run_init_script(
-                sessions
-                    .lock()
-                    .unwrap()
-                    .get(&session_id)
-                    .ok_or_else(|| "session not found".to_string())?
-                    .ssh
-                    .clone(),
-                script,
-            )?;
+            run_init_script(ssh, script)?;
         }
 
         Ok(ConnectReply {
@@ -162,10 +243,7 @@ fn write_input(
     input: String,
     state: State<'_, SessionStore>,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
+    let session = get_session(&state, &session_id)?;
     session
         .ssh
         .write(input.into_bytes())
@@ -179,10 +257,7 @@ fn resize_session(
     rows: u16,
     state: State<'_, SessionStore>,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
+    let session = get_session(&state, &session_id)?;
     session
         .ssh
         .resize(cols, rows)
@@ -202,109 +277,314 @@ fn disconnect_session(session_id: String, state: State<'_, SessionStore>) -> Res
 }
 
 #[tauri::command]
-fn list_dir(
+async fn list_dir(
     session_id: String,
     path: String,
     state: State<'_, SessionStore>,
 ) -> Result<Vec<DirEntryDto>, String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
-    session
-        .sftp
-        .list_dir(path)
-        .map(|entries| entries.into_iter().map(DirEntryDto::from).collect())
-        .map_err(|error| error.to_string())
+    let session = get_session(&state, &session_id)?;
+    blocking(move || {
+        session
+            .sftp
+            .list_dir(path)
+            .map(|entries| entries.into_iter().map(DirEntryDto::from).collect())
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn read_file(
+async fn read_file(
     session_id: String,
     path: String,
     max_bytes: u32,
     state: State<'_, SessionStore>,
 ) -> Result<Vec<u8>, String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
-    session
-        .sftp
-        .read_file(path, 0, max_bytes)
-        .map_err(|error| error.to_string())
+    let session = get_session(&state, &session_id)?;
+    blocking(move || {
+        session
+            .sftp
+            .read_file(path, 0, max_bytes)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn write_file(
+async fn write_file(
     session_id: String,
     path: String,
     bytes: Vec<u8>,
     state: State<'_, SessionStore>,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
-    session
-        .sftp
-        .write_file(path, bytes)
-        .map_err(|error| error.to_string())
+    let session = get_session(&state, &session_id)?;
+    blocking(move || session.sftp.write_file(path, bytes).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-fn mkdir(session_id: String, path: String, state: State<'_, SessionStore>) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
-    session.sftp.mkdir(path).map_err(|error| error.to_string())
+async fn mkdir(
+    session_id: String,
+    path: String,
+    state: State<'_, SessionStore>,
+) -> Result<(), String> {
+    let session = get_session(&state, &session_id)?;
+    blocking(move || session.sftp.mkdir(path).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-fn rename_path(
+async fn rename_path(
     session_id: String,
     from: String,
     to: String,
     state: State<'_, SessionStore>,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
-    session
-        .sftp
-        .rename(from, to)
-        .map_err(|error| error.to_string())
+    let session = get_session(&state, &session_id)?;
+    blocking(move || session.sftp.rename(from, to).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-fn delete_path(
+async fn delete_path(
     session_id: String,
     path: String,
     is_dir: bool,
     state: State<'_, SessionStore>,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "session not found".to_string())?;
-    if is_dir {
-        session
-            .sftp
-            .delete_dir(path)
-            .map_err(|error| error.to_string())
+    let session = get_session(&state, &session_id)?;
+    blocking(move || {
+        if is_dir {
+            session.sftp.delete_dir(path).map_err(|e| e.to_string())
+        } else {
+            session.sftp.delete_file(path).map_err(|e| e.to_string())
+        }
+    })
+    .await
+}
+
+/// 1 MB 一块 emit `download-chunk`。完整命中本地 cache 直接从 .dat 读;
+/// 半命中(.dat.tmp 存在且长度 < expected)从偏移续传。事件:
+/// download-chunk / download-done / download-error / download-cancelled。
+#[tauri::command]
+async fn start_download(
+    download_id: String,
+    session_id: String,
+    path: String,
+    app: AppHandle,
+    state: State<'_, SessionStore>,
+    downloads: State<'_, DownloadStore>,
+    cache_state: State<'_, CacheState>,
+) -> Result<u64, String> {
+    let session = get_session(&state, &session_id)?;
+    let cache = cache_state.get()?;
+
+    // stat 先发一次拿当前 size/mtime;文件若被服务器端更新,cache key 自动失效。
+    let sftp_for_stat = session.sftp.clone();
+    let path_for_stat = path.clone();
+    let entry = blocking(move || sftp_for_stat.stat(path_for_stat).map_err(|e| e.to_string())).await?;
+    let total = entry.size;
+    let key = SftpCache::key_for(&session.host, &session.user, &path, total, entry.mtime);
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    downloads
+        .map
+        .lock()
+        .unwrap()
+        .insert(download_id.clone(), cancel.clone());
+
+    let job = DownloadJob {
+        app,
+        downloads_map: downloads.map.clone(),
+        cache,
+        sftp: session.sftp.clone(),
+        path,
+        download_id,
+        key,
+        total,
+        cancel,
+    };
+    // std::thread 而非 spawn_blocking:下载可能跑几十分钟,不想占 tokio blocking pool
+    // 的槽位(默认 512,多开几个会挤掉其他 spawn_blocking)。
+    thread::spawn(move || job.run());
+    Ok(total)
+}
+
+struct DownloadJob {
+    app: AppHandle,
+    downloads_map: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    cache: Arc<SftpCache>,
+    sftp: Arc<SftpSession>,
+    path: String,
+    download_id: String,
+    key: String,
+    total: u64,
+    cancel: Arc<AtomicBool>,
+}
+
+/// 下载线程 panic 也保证从 DownloadStore 清掉取消 flag,不泄漏。
+struct DownloadGuard<'a> {
+    map: &'a Mutex<HashMap<String, Arc<AtomicBool>>>,
+    id: &'a str,
+}
+impl Drop for DownloadGuard<'_> {
+    fn drop(&mut self) {
+        self.map.lock().unwrap().remove(self.id);
+    }
+}
+
+impl DownloadJob {
+    fn run(self) {
+        let _guard = DownloadGuard {
+            map: &self.downloads_map,
+            id: &self.download_id,
+        };
+
+        if let Some(cached) = self.cache.complete_file_of(&self.key, self.total) {
+            if let Ok(mut f) = fs::File::open(&cached) {
+                self.stream_reader(&mut f, 0);
+                return;
+            }
+        }
+
+        let tmp_path = self.cache.tmp_file(&self.key);
+        let mut offset: u64 = fs::metadata(&tmp_path).map(|m| m.len()).unwrap_or(0);
+        if offset > self.total {
+            let _ = fs::remove_file(&tmp_path);
+            offset = 0;
+        }
+        if offset > 0 {
+            // SAF / save-as 目标只能从零顺序写,不能 seek,必须把已缓存段先 replay。
+            if let Ok(mut f) = fs::File::open(&tmp_path) {
+                if !self.stream_reader(&mut f, 0) {
+                    return;
+                }
+            }
+        }
+
+        let mut tmp_file = match fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&tmp_path)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                self.emit_error(&format!("open tmp: {e}"));
+                return;
+            }
+        };
+        loop {
+            if self.cancel.load(Ordering::SeqCst) {
+                self.emit(EV_CANCELLED, offset);
+                break;
+            }
+            match self.sftp.read_file(self.path.clone(), offset, DOWNLOAD_CHUNK) {
+                Ok(bytes) if bytes.is_empty() => {
+                    self.emit(EV_DONE, offset);
+                    break;
+                }
+                Ok(bytes) => {
+                    if let Err(e) = tmp_file.write_all(&bytes) {
+                        self.emit_error(&format!("write tmp: {e}"));
+                        break;
+                    }
+                    let len = bytes.len() as u64;
+                    offset += len;
+                    self.emit_chunk(offset, bytes);
+                    if len < DOWNLOAD_CHUNK as u64 {
+                        self.emit(EV_DONE, offset);
+                        break;
+                    }
+                }
+                Err(error) => {
+                    self.emit_error(&error.to_string());
+                    break;
+                }
+            }
+        }
+
+        drop(tmp_file);
+        if offset == self.total {
+            let _ = self.cache.promote_tmp_to_final(&self.key);
+            self.cache.record_write(self.total);
+            self.cache.trim(MAX_CACHE_BYTES);
+        }
+    }
+
+    /// 把本地 reader 按块 emit 给前端;返回 false 表示因取消/错误中断,调用方应退出。
+    fn stream_reader(&self, reader: &mut impl Read, initial_offset: u64) -> bool {
+        let mut buf = vec![0u8; DOWNLOAD_CHUNK as usize];
+        let mut offset = initial_offset;
+        loop {
+            if self.cancel.load(Ordering::SeqCst) {
+                self.emit(EV_CANCELLED, offset);
+                return false;
+            }
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    if initial_offset == 0 {
+                        self.emit(EV_DONE, offset);
+                    }
+                    return true;
+                }
+                Ok(n) => {
+                    offset += n as u64;
+                    self.emit_chunk(offset, buf[..n].to_vec());
+                }
+                Err(e) => {
+                    self.emit_error(&e.to_string());
+                    return false;
+                }
+            }
+        }
+    }
+
+    fn emit_chunk(&self, offset: u64, bytes: Vec<u8>) {
+        let _ = self.app.emit(
+            EV_CHUNK,
+            DownloadChunkEvent {
+                download_id: self.download_id.clone(),
+                offset,
+                total: self.total,
+                bytes,
+            },
+        );
+    }
+
+    fn emit(&self, event: &str, total: u64) {
+        let _ = self.app.emit(
+            event,
+            DownloadDoneEvent {
+                download_id: self.download_id.clone(),
+                total,
+            },
+        );
+    }
+
+    fn emit_error(&self, message: &str) {
+        let _ = self.app.emit(
+            EV_ERROR,
+            DownloadErrorEvent {
+                download_id: self.download_id.clone(),
+                message: message.to_string(),
+            },
+        );
+    }
+}
+
+#[tauri::command]
+fn cancel_download(
+    download_id: String,
+    downloads: State<'_, DownloadStore>,
+) -> Result<(), String> {
+    if let Some(flag) = downloads.map.lock().unwrap().get(&download_id) {
+        flag.store(true, Ordering::SeqCst);
+        Ok(())
     } else {
-        session
-            .sftp
-            .delete_file(path)
-            .map_err(|error| error.to_string())
+        Err("download not found".to_string())
     }
 }
 
 fn spawn_reader(
     app: AppHandle,
-    sessions: Arc<Mutex<HashMap<String, ManagedSession>>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<ManagedSession>>>>,
     session_id: String,
     ssh: Arc<SshSession>,
 ) {
@@ -395,6 +675,8 @@ impl From<DirEntry> for DirEntryDto {
 pub fn run() {
     tauri::Builder::default()
         .manage(SessionStore::default())
+        .manage(DownloadStore::default())
+        .manage(CacheState::default())
         .invoke_handler(tauri::generate_handler![
             connect_session,
             write_input,
@@ -405,7 +687,9 @@ pub fn run() {
             write_file,
             mkdir,
             rename_path,
-            delete_path
+            delete_path,
+            start_download,
+            cancel_download
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

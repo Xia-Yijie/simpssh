@@ -27,8 +27,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "app", "dmg", "deb"],
     "icon": ["icons/icon.png", "icons/icon.ico"],
+    "category": "DeveloperTool",
+    "shortDescription": "SSH client with file browser",
+    "longDescription": "simpssh — SSH / SFTP client with xterm terminal and file tree.",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
@@ -37,6 +40,14 @@
         "displayLanguageSelector": true,
         "languages": ["SimpChinese", "English"],
         "installMode": "currentUser"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
       }
     }
   }

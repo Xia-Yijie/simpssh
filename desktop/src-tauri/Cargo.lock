@@ -4817,7 +4817,9 @@ dependencies = [
 name = "simpssh-desktop"
 version = "0.6.13"
 dependencies = [
+ "hex",
  "serde",
+ "sha2 0.10.9",
  "simpssh-core",
  "tauri",
  "tauri-build",

@@ -11,9 +11,12 @@ $version = (Get-Content -LiteralPath $tauriConf -Raw | ConvertFrom-Json).version
 $setup = Join-Path $repoRoot "release\simpssh_${version}_x64-setup.exe"
 $portableExe = Join-Path $repoRoot "release\simpssh.exe"
 
-$env:CARGO_HOME = "E:\rust\cargo"
-$env:RUSTUP_HOME = "E:\rust\rustup"
-$env:Path = "E:\rust\cargo\bin;" + $env:Path
+# 允许用户通过 CARGO_HOME / RUSTUP_HOME 覆盖 Rust 工具链位置;没设则走默认
+# %USERPROFILE%\.cargo 和 %USERPROFILE%\.rustup,和 rustup 官方安装一致。
+if (-not $env:CARGO_HOME) { $env:CARGO_HOME = Join-Path $env:USERPROFILE ".cargo" }
+if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = Join-Path $env:USERPROFILE ".rustup" }
+$cargoBin = Join-Path $env:CARGO_HOME "bin"
+if ($env:Path -notlike "*$cargoBin*") { $env:Path = "$cargoBin;" + $env:Path }
 
 if (-not (Test-Path $webview2Path)) {
   Write-Host "Downloading WebView2 bootstrapper from Microsoft..."

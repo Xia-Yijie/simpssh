@@ -3,221 +3,43 @@ import type { CSSProperties } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import { Icon, NerdIcon, glyphForFile } from './icons'
+import {
+  CUSTOM_PALETTES_KEY,
+  DOWNLOAD_MAX_BYTES,
+  LAST_CONN_KEY,
+  PREVIEW_MAX_BYTES,
+  SIDEBAR_COLLAPSED_KEY,
+  SIDEBAR_WIDTH_KEY,
+  TERM_COLS,
+  TERM_ROWS,
+  THEME_KEY,
+} from './constants'
+import { EMPTY_CUSTOM_PALETTE_DRAFT, EMPTY_DRAFT } from './drafts'
+import { PALETTES } from './themes'
+import { useServerStore } from './stores/servers'
+import type {
+  ConnectReply,
+  CustomPaletteDraft,
+  DirEntry,
+  FileInfoState,
+  InitScript,
+  PreviewState,
+  SavedServer,
+  ServerDraft,
+  SessionMessageEvent,
+  SessionTab,
+  SshOutputEvent,
+  TextInputRequest,
+  ThemePalette,
+} from './types'
 import './App.css'
 
-type ConnectReply = {
-  sessionId: string
-  rootPath: string
-}
-
-type DirEntry = {
-  name: string
-  path: string
-  size: number
-  mtime: number
-  isDir: boolean
-  isLink: boolean
-  mode: number
-}
-
-type SavedServer = {
-  id: string
-  name: string
-  host: string
-  port: number
-  user: string
-  password: string
-  initScripts: InitScript[]
-}
-
-type InitScript = {
-  id: string
-  name: string
-  workingDir: string
-  content: string
-}
-
-type SessionTab = {
-  sessionId: string
-  serverId: string | null
-  scriptId: string | null
-  title: string
-  view: 'terminal' | 'files'
-  rootPath: string
-  cwd: string
-  entries: DirEntry[]
-  fileChildren: Record<string, DirEntry[]>
-  expandedDirs: string[]
-  loadingDirs: string[]
-  filesLoaded: boolean
-  filesStatus: string
-  filesBusy: boolean
-  selectedPath: string | null
-  status: string
-  connected: boolean
-}
-
-type PreviewState =
-  | { sessionId: string; kind: 'text'; name: string; content: string }
-  | { sessionId: string; kind: 'image'; name: string; objectUrl: string }
-  | { sessionId: string; kind: 'binary'; name: string; message: string }
-  | null
-
-type FileInfoState =
-  | {
-      title: string
-      rows: Array<{ label: string; value: string }>
-    }
-  | null
-
-type TextInputRequest = {
-  title: string
-  label: string
-  confirmText?: string
-  value: string
-}
-
-type SshOutputEvent = {
-  sessionId: string
-  bytes: number[]
-}
-
-type SessionMessageEvent = {
-  sessionId: string
-  message: string
-}
-
-type ServerDraft = {
-  id?: string
-  name: string
-  host: string
-  port: string
-  user: string
-  password: string
-  initScripts: InitScript[]
-}
-
-type ThemePalette = {
-  name: string
-  displayName: string
-  primary: string
-  onPrimary: string
-  primaryContainer: string
-  onPrimaryContainer: string
-  darkBackground: string
-  darkSurface: string
-  darkSurfaceVariant: string
-  custom?: boolean
-}
-
-type CustomPaletteDraft = {
-  id?: string
-  displayName: string
-  primary: string
-  primaryContainer: string
-  darkBackground: string
-}
-
-const STORAGE_KEY = 'simpssh.desktop.savedServers.v1'
-const THEME_KEY = 'simpssh.desktop.theme.v1'
-const LAST_CONN_KEY = 'simpssh.desktop.lastConnected.v1'
-const CUSTOM_PALETTES_KEY = 'simpssh.desktop.customPalettes.v1'
-const SIDEBAR_WIDTH_KEY = 'simpssh.desktop.sidebarWidth.v1'
-const SIDEBAR_COLLAPSED_KEY = 'simpssh.desktop.sidebarCollapsed.v1'
-const PREVIEW_MAX_BYTES = 2 * 1024 * 1024
-const DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024
-const TERM_COLS = 120
-const TERM_ROWS = 32
-
-const PALETTES: ThemePalette[] = [
-  {
-    name: 'default',
-    displayName: '普鲁士蓝',
-    primary: '#4A8FD9',
-    onPrimary: '#FFFFFF',
-    primaryContainer: '#1A3A66',
-    onPrimaryContainer: '#D7E3FF',
-    darkBackground: '#0B1A33',
-    darkSurface: '#11244A',
-    darkSurfaceVariant: '#1A3661',
-  },
-  {
-    name: 'dracula',
-    displayName: '德古拉紫',
-    primary: '#BD93F9',
-    onPrimary: '#282A36',
-    primaryContainer: '#44475A',
-    onPrimaryContainer: '#F8F8F2',
-    darkBackground: '#282A36',
-    darkSurface: '#1E1F29',
-    darkSurfaceVariant: '#44475A',
-  },
-  {
-    name: 'monokai',
-    displayName: '莫诺凯绿',
-    primary: '#A6E22E',
-    onPrimary: '#272822',
-    primaryContainer: '#49483E',
-    onPrimaryContainer: '#F8F8F2',
-    darkBackground: '#272822',
-    darkSurface: '#1E1F1C',
-    darkSurfaceVariant: '#49483E',
-  },
-  {
-    name: 'morninglight',
-    displayName: '晨曦白',
-    primary: '#0969DA',
-    onPrimary: '#FFFFFF',
-    primaryContainer: '#DDF4FF',
-    onPrimaryContainer: '#0A3069',
-    darkBackground: '#FAFBFC',
-    darkSurface: '#F6F8FA',
-    darkSurfaceVariant: '#EAEEF2',
-  },
-  {
-    name: 'warmcream',
-    displayName: '米色暖光',
-    primary: '#859900',
-    onPrimary: '#002B36',
-    primaryContainer: '#EEE8D5',
-    onPrimaryContainer: '#586E75',
-    darkBackground: '#FDF6E3',
-    darkSurface: '#F7F0D8',
-    darkSurfaceVariant: '#EEE8D5',
-  },
-  {
-    name: 'lightmist',
-    displayName: '轻雾灰',
-    primary: '#5C6BC0',
-    onPrimary: '#FFFFFF',
-    primaryContainer: '#E8EAF6',
-    onPrimaryContainer: '#1A237E',
-    darkBackground: '#F5F5F7',
-    darkSurface: '#EBEDF0',
-    darkSurfaceVariant: '#DFE2E8',
-  },
-]
-
-const EMPTY_DRAFT: ServerDraft = {
-  name: '',
-  host: '',
-  port: '22',
-  user: '',
-  password: '',
-  initScripts: [],
-}
-
-const EMPTY_CUSTOM_PALETTE_DRAFT: CustomPaletteDraft = {
-  displayName: '',
-  primary: '#4A8FD9',
-  primaryContainer: '#1A3A66',
-  darkBackground: '#0B1A33',
-}
-
 function App() {
-  const [savedServers, setSavedServers] = useState<SavedServer[]>(() => loadSavedServers())
+  const savedServers = useServerStore((s) => s.servers)
+  const setSavedServers = useServerStore((s) => s.setServers)
   const [sessions, setSessions] = useState<SessionTab[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [globalStatus, setGlobalStatus] = useState('准备连接')
@@ -258,10 +80,6 @@ function App() {
   useEffect(() => {
     sessionsRef.current = sessions
   }, [sessions])
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(savedServers))
-  }, [savedServers])
 
   useEffect(() => {
     window.localStorage.setItem(THEME_KEY, themeName)
@@ -2038,6 +1856,15 @@ function SessionTerminal({
     const host = hostRef.current
     if (host) {
       terminal.open(host)
+      // WebGL renderer 比默认 canvas 快一档;GPU 有问题(远程桌面/老显卡)时
+      // context lost 事件里会 dispose,自动回退到 canvas。
+      try {
+        const webgl = new WebglAddon()
+        webgl.onContextLoss(() => webgl.dispose())
+        terminal.loadAddon(webgl)
+      } catch (e) {
+        console.warn('WebGL renderer unavailable, falling back to canvas:', e)
+      }
       fitAddon.fit()
       resizeObserverRef.current = new ResizeObserver(() => {
         void resizeTerminal(sessionId, terminalRef.current, fitAddonRef.current)
@@ -2694,44 +2521,6 @@ function formatTimeAgo(ms: number): string {
   if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`
   const d = new Date(ms)
   return `${d.getMonth() + 1}/${d.getDate()}`
-}
-
-function loadSavedServers(): SavedServer[] {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as Partial<SavedServer>[]
-    return Array.isArray(parsed)
-      ? parsed
-          .filter(
-            (item) =>
-              typeof item?.id === 'string' &&
-              typeof item?.host === 'string' &&
-              typeof item?.user === 'string',
-          )
-          .map((item) => ({
-            id: item.id!,
-            name: typeof item.name === 'string' ? item.name : '',
-            host: item.host!,
-            port: typeof item.port === 'number' ? item.port : 22,
-            user: item.user!,
-            password: typeof item.password === 'string' ? item.password : '',
-            initScripts: Array.isArray(item.initScripts)
-              ? item.initScripts
-                  .filter((script) => typeof script?.id === 'string')
-                  .map((script) => ({
-                    id: script.id,
-                    name: typeof script.name === 'string' ? script.name : '',
-                    workingDir:
-                      typeof script.workingDir === 'string' ? script.workingDir : '',
-                    content: typeof script.content === 'string' ? script.content : '',
-                  }))
-              : [],
-          }))
-      : []
-  } catch {
-    return []
-  }
 }
 
 function loadThemeName() {
