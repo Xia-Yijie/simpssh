@@ -54,9 +54,9 @@ export type SessionTab = {
 }
 
 export type PreviewState =
-  | { sessionId: string; kind: 'text'; name: string; content: string }
-  | { sessionId: string; kind: 'image'; name: string; objectUrl: string }
-  | { sessionId: string; kind: 'binary'; name: string; message: string }
+  | { sessionId: string; path: string; kind: 'text'; name: string; content: string; language: string }
+  | { sessionId: string; path: string; kind: 'image'; name: string; objectUrl: string }
+  | { sessionId: string; path: string; kind: 'binary'; name: string; message: string }
   | null
 
 export type FileInfoState =

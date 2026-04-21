@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import Editor, { loader } from '@monaco-editor/react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
+import * as monaco from 'monaco-editor'
+import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
+import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
+import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
+import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import { Terminal } from '@xterm/xterm'
 import { Icon, NerdIcon, glyphForFile } from './icons'
 import {
@@ -37,6 +43,33 @@ import type {
 } from './types'
 import './App.css'
 
+self.MonacoEnvironment = {
+  getWorker(_: unknown, label: string) {
+    if (label === 'json') return new jsonWorker()
+    if (label === 'css' || label === 'scss' || label === 'less') return new cssWorker()
+    if (label === 'html' || label === 'handlebars' || label === 'razor') return new htmlWorker()
+    if (label === 'typescript' || label === 'javascript') return new tsWorker()
+    return new editorWorker()
+  },
+}
+
+loader.config({ monaco })
+
+function useDismissOnOutsideClick(active: boolean, dismiss: () => void) {
+  useEffect(() => {
+    if (!active) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dismiss()
+    }
+    window.addEventListener('click', dismiss)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('click', dismiss)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [active, dismiss])
+}
+
 function App() {
   const savedServers = useServerStore((s) => s.servers)
   const setSavedServers = useServerStore((s) => s.setServers)
@@ -53,6 +86,11 @@ function App() {
   const [connectPickerServer, setConnectPickerServer] = useState<SavedServer | null>(null)
   const [serverErrors, setServerErrors] = useState<Record<string, string>>({})
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null)
+  const [serverMenu, setServerMenu] = useState<
+    | { kind: 'host'; serverId: string; x: number; y: number }
+    | { kind: 'blank'; x: number; y: number }
+    | null
+  >(null)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const raw = window.localStorage.getItem(SIDEBAR_WIDTH_KEY)
     const value = raw ? Number(raw) : 260
@@ -170,21 +208,8 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!tabMenu) return
-
-    const closeMenu = () => setTabMenu(null)
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setTabMenu(null)
-    }
-
-    window.addEventListener('click', closeMenu)
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('click', closeMenu)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [tabMenu])
+  useDismissOnOutsideClick(!!tabMenu, useCallback(() => setTabMenu(null), []))
+  useDismissOnOutsideClick(!!serverMenu, useCallback(() => setServerMenu(null), []))
 
   const palette = useMemo(
     () =>
@@ -254,6 +279,11 @@ function App() {
       cursor: palette.primary,
       selectionBackground: rgbaFromHex(palette.primary, 0.28),
     }),
+    [palette],
+  )
+
+  const editorTheme = useMemo(
+    () => (isLightColor(palette.darkBackground) ? 'vs' : 'vs-dark'),
     [palette],
   )
 
@@ -554,7 +584,13 @@ function App() {
           const objectUrl = URL.createObjectURL(new Blob([uint8]))
           setPreview((current) => {
             if (current?.kind === 'image') URL.revokeObjectURL(current.objectUrl)
-            return { sessionId: activeSessionId, kind: 'image', name: entry.name, objectUrl }
+            return {
+              sessionId: activeSessionId,
+              path: entry.path,
+              kind: 'image',
+              name: entry.name,
+              objectUrl,
+            }
           })
         } else {
           const text = new TextDecoder().decode(uint8)
@@ -562,12 +598,20 @@ function App() {
           if (badChars > Math.max(8, Math.floor(text.length / 40))) {
             setPreview({
               sessionId: activeSessionId,
+              path: entry.path,
               kind: 'binary',
               name: entry.name,
               message: `该文件看起来不是文本文件，当前预览上限 ${formatBytes(maxBytes)}。`,
             })
           } else {
-            setPreview({ sessionId: activeSessionId, kind: 'text', name: entry.name, content: text })
+            setPreview({
+              sessionId: activeSessionId,
+              path: entry.path,
+              kind: 'text',
+              name: entry.name,
+              content: text,
+              language: detectPreviewLanguage(entry.name),
+            })
           }
         }
         updateSession(activeSessionId, (session) => ({
@@ -584,6 +628,47 @@ function App() {
       }
     },
     [activeSessionId, updateSession],
+  )
+
+  const savePreviewContent = useCallback(
+    async (content: string) => {
+      if (!preview || preview.kind !== 'text') return
+
+      const bytes = Array.from(new TextEncoder().encode(content))
+      updateSession(preview.sessionId, (session) => ({
+        ...session,
+        filesBusy: true,
+        filesStatus: `正在保存 ${preview.name}`,
+      }))
+
+      try {
+        await invoke('write_file', {
+          sessionId: preview.sessionId,
+          path: preview.path,
+          bytes,
+        })
+
+        setPreview((current) =>
+          current?.kind === 'text' && current.path === preview.path
+            ? { ...current, content }
+            : current,
+        )
+
+        updateSession(preview.sessionId, (session) => ({
+          ...session,
+          filesBusy: false,
+          filesStatus: `已保存 ${preview.name}`,
+        }))
+        setGlobalStatus(`已保存 ${preview.name}`)
+      } catch (error) {
+        updateSession(preview.sessionId, (session) => ({
+          ...session,
+          filesBusy: false,
+          filesStatus: `保存失败: ${formatError(error)}`,
+        }))
+      }
+    },
+    [preview, updateSession],
   )
 
   const downloadEntry = useCallback(
@@ -983,31 +1068,6 @@ function App() {
 
   return (
     <div className="app" style={themeVars}>
-      <div className="titlebar">
-        <div className="brand">
-          <strong>simpssh</strong>
-        </div>
-        <div className="titlebar-spacer" />
-        <div className="titlebar-actions">
-          <button
-            type="button"
-            className="titlebar-btn"
-            title="操作指南"
-            onClick={() => setGuideOpen(true)}
-          >
-            <Icon.Help size={14} />
-          </button>
-          <button
-            type="button"
-            className="titlebar-btn"
-            title="设置"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Icon.Settings size={14} />
-          </button>
-        </div>
-      </div>
-
       <div className="main">
         <div
           className={`sidebar-frame${sidebarCollapsed ? ' collapsed' : ''}`}
@@ -1020,30 +1080,17 @@ function App() {
             busyServerId={busyServerId}
             onOpenHost={handleOpenServer}
             onNewHost={() => openEditorFor(null)}
-            onToggleCollapse={toggleSidebar}
+            onHostContextMenu={(server, x, y) =>
+              setServerMenu({ kind: 'host', serverId: server.id, x, y })
+            }
+            onBlankContextMenu={(x, y) => setServerMenu({ kind: 'blank', x, y })}
           />
         </div>
 
         <div
           className={`sidebar-divider${sidebarCollapsed ? ' collapsed' : ''}`}
           onMouseDown={() => startSidebarResize()}
-        >
-          {sidebarCollapsed && (
-            <button
-              type="button"
-              className="sidebar-toggle"
-              title="展开侧栏"
-              onClick={(event) => {
-                event.stopPropagation()
-                toggleSidebar()
-              }}
-            >
-              <span className="sidebar-toggle-icon collapsed">
-                <Icon.ChevronRight size={11} />
-              </span>
-            </button>
-          )}
-        </div>
+        />
 
         <div className="workspace">
           <div className="tabbar">
@@ -1061,6 +1108,34 @@ function App() {
               </div>
             ))}
             <div className="tabbar-spacer" />
+            <div className="tabbar-actions">
+              <button
+                type="button"
+                className="titlebar-btn"
+                title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+                onClick={toggleSidebar}
+              >
+                <span className={`titlebar-sidebar-icon${sidebarCollapsed ? ' collapsed' : ''}`}>
+                  <Icon.ChevronRight size={13} />
+                </span>
+              </button>
+              <button
+                type="button"
+                className="titlebar-btn"
+                title="操作指南"
+                onClick={() => setGuideOpen(true)}
+              >
+                <Icon.Help size={14} />
+              </button>
+              <button
+                type="button"
+                className="titlebar-btn"
+                title="设置"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Icon.Settings size={14} />
+              </button>
+            </div>
           </div>
 
           {tabMenu && (
@@ -1090,12 +1165,71 @@ function App() {
             </div>
           )}
 
+          {serverMenu && (
+            <div
+              className="tab-context-menu"
+              style={{ left: serverMenu.x, top: serverMenu.y }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {serverMenu.kind === 'host' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const server = savedServers.find((item) => item.id === serverMenu.serverId)
+                      if (!server) return
+                      if (server.initScripts.length > 0) {
+                        setConnectPickerServer(server)
+                      } else {
+                        void connectServer(server)
+                      }
+                      setServerMenu(null)
+                    }}
+                  >
+                    连接方式
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const server = savedServers.find((item) => item.id === serverMenu.serverId)
+                      if (!server) return
+                      openEditorFor(server)
+                      setServerMenu(null)
+                    }}
+                  >
+                    修改
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      deleteServer(serverMenu.serverId)
+                      setServerMenu(null)
+                    }}
+                  >
+                    删除
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    openEditorFor(null)
+                    setServerMenu(null)
+                  }}
+                >
+                  新建主机
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="view">
             {activeSession ? (
               <SessionView
                 session={activeSession}
                 preview={preview?.sessionId === activeSession.sessionId ? preview : null}
                 terminalTheme={terminalTheme}
+                editorTheme={editorTheme}
                 onSetView={(view) => void setSessionView(activeSession.sessionId, view)}
                 onToggleDirectory={(entry) => void toggleDirectory(activeSession.sessionId, entry)}
                 onSelectEntry={(path) =>
@@ -1114,6 +1248,7 @@ function App() {
                 onSwitchRoot={() => void switchRootDirectory()}
                 onCopyPath={(path) => void copyPathToClipboard(path)}
                 onShowInfo={(entry) => showFileInfo(entry, activeSession.cwd)}
+                onSavePreview={(content) => void savePreviewContent(content)}
                 onClosePreview={() => {
                   if (preview?.kind === 'image') URL.revokeObjectURL(preview.objectUrl)
                   setPreview(null)
@@ -1240,7 +1375,8 @@ function Sidebar({
   busyServerId,
   onOpenHost,
   onNewHost,
-  onToggleCollapse,
+  onHostContextMenu,
+  onBlankContextMenu,
 }: {
   servers: SavedServer[]
   activeServerId: string | null
@@ -1248,18 +1384,14 @@ function Sidebar({
   busyServerId: string | null
   onOpenHost: (server: SavedServer) => void
   onNewHost: () => void
-  onToggleCollapse: () => void
+  onHostContextMenu: (server: SavedServer, x: number, y: number) => void
+  onBlankContextMenu: (x: number, y: number) => void
 }) {
   return (
     <aside className="sidebar">
         <div className="sidebar-header">
           主机
           <div className="actions">
-            <button type="button" className="icon-btn" title="收起侧栏" onClick={onToggleCollapse}>
-              <span className="sidebar-toggle-icon">
-                <Icon.ChevronRight size={14} />
-              </span>
-            </button>
             <button type="button" className="icon-btn" title="新建主机" onClick={onNewHost}>
               <Icon.Plus size={14} />
             </button>
@@ -1280,6 +1412,10 @@ function Sidebar({
                     type="button"
                     className={`host-row${selected ? ' selected' : ''}`}
                     onClick={() => onOpenHost(server)}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      onHostContextMenu(server, event.clientX, event.clientY)
+                    }}
                     title={`${server.user}@${server.host}`}
                   >
                     <div className="lines">
@@ -1297,6 +1433,14 @@ function Sidebar({
               )
             })
           )}
+          <div
+            className="sidebar-blank-space"
+            onContextMenu={(event) => {
+              if (event.target !== event.currentTarget) return
+              event.preventDefault()
+              onBlankContextMenu(event.clientX, event.clientY)
+            }}
+          />
       </div>
     </aside>
   )
@@ -1489,6 +1633,7 @@ function SessionView({
   session,
   preview,
   terminalTheme,
+  editorTheme,
   onSetView,
   onToggleDirectory,
   onSelectEntry,
@@ -1502,6 +1647,7 @@ function SessionView({
   onSwitchRoot,
   onCopyPath,
   onShowInfo,
+  onSavePreview,
   onClosePreview,
   allSessions,
 }: {
@@ -1513,6 +1659,7 @@ function SessionView({
     cursor: string
     selectionBackground: string
   }
+  editorTheme: 'vs' | 'vs-dark'
   onSetView: (view: SessionTab['view']) => void
   onToggleDirectory: (entry: DirEntry) => void
   onSelectEntry: (path: string) => void
@@ -1526,6 +1673,7 @@ function SessionView({
   onSwitchRoot: () => void
   onCopyPath: (path: string) => void
   onShowInfo: (entry: DirEntry | null) => void
+  onSavePreview: (content: string) => void
   onClosePreview: () => void
   allSessions: SessionTab[]
 }) {
@@ -1592,17 +1740,14 @@ function SessionView({
         </div>
 
         <section className={`files-view${session.view === 'files' ? '' : ' hidden'}`}>
-          <div className="files-header">
-            <span className="path" title={session.cwd}>
-              {session.cwd}
-            </span>
-            <span className={`files-status-inline${session.filesBusy ? ' busy' : ''}`}>
-              {session.filesStatus}
-            </span>
-          </div>
-
           {preview ? (
-            <FilePreviewPane preview={preview} onClose={onClosePreview} />
+            <FilePreviewPane
+              key={`${preview.kind}|${preview.path}`}
+              preview={preview}
+              editorTheme={editorTheme}
+              onSave={onSavePreview}
+              onClose={onClosePreview}
+            />
           ) : (
             <div
               className="file-list"
@@ -1632,6 +1777,12 @@ function SessionView({
                       onSelectEntry(row.entry.path)
                       if (row.entry.isDir) {
                         onToggleDirectory(row.entry)
+                      }
+                    }}
+                    onDoubleClick={() => {
+                      onSelectEntry(row.entry.path)
+                      if (!row.entry.isDir) {
+                        onPreviewEntry(row.entry)
                       }
                     }}
                     style={{ ['--tree-depth' as string]: row.depth }}
@@ -1856,15 +2007,6 @@ function SessionTerminal({
     const host = hostRef.current
     if (host) {
       terminal.open(host)
-      // WebGL renderer 比默认 canvas 快一档;GPU 有问题(远程桌面/老显卡)时
-      // context lost 事件里会 dispose,自动回退到 canvas。
-      try {
-        const webgl = new WebglAddon()
-        webgl.onContextLoss(() => webgl.dispose())
-        terminal.loadAddon(webgl)
-      } catch (e) {
-        console.warn('WebGL renderer unavailable, falling back to canvas:', e)
-      }
       fitAddon.fit()
       resizeObserverRef.current = new ResizeObserver(() => {
         void resizeTerminal(sessionId, terminalRef.current, fitAddonRef.current)
@@ -2378,22 +2520,172 @@ function PalettePreview({ palette }: { palette: ThemePalette }) {
 
 function FilePreviewPane({
   preview,
+  editorTheme,
+  onSave,
   onClose,
 }: {
   preview: Exclude<PreviewState, null>
+  editorTheme: 'vs' | 'vs-dark'
+  onSave: (content: string) => Promise<void> | void
   onClose: () => void
 }) {
+  const [draft, setDraft] = useState(preview.kind === 'text' ? preview.content : '')
+  const [saving, setSaving] = useState(false)
+  const [language, setLanguage] = useState(preview.kind === 'text' ? preview.language : 'plaintext')
+  const [wordWrap, setWordWrap] = useState(true)
+  const [tabSize, setTabSize] = useState(2)
+  const [insertSpaces, setInsertSpaces] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const dirty = preview.kind === 'text' && draft !== preview.content
+  const lineCount = useMemo(
+    () => (preview.kind === 'text' ? draft.split('\n').length : 0),
+    [draft, preview.kind],
+  )
+  const charCount = preview.kind === 'text' ? draft.length : 0
+
+  const handleSave = useCallback(async () => {
+    if (preview.kind !== 'text' || !dirty || saving) return
+    setSaving(true)
+    try {
+      await onSave(draft)
+    } finally {
+      setSaving(false)
+    }
+  }, [draft, dirty, onSave, preview.kind, saving])
+
+  useEffect(() => {
+    if (preview.kind !== 'text') return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        void handleSave()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [handleSave, preview.kind])
+
+  useDismissOnOutsideClick(settingsOpen, useCallback(() => setSettingsOpen(false), []))
+
+  const activeLanguage = preview.kind === 'text' ? languageOptionFor(language) : null
+
   return (
     <div className="preview-pane">
       <div className="preview-header">
-        <h3>{preview.name}</h3>
-        <button type="button" className="btn sm" onClick={onClose}>
-          返回列表
-        </button>
+        <div className="preview-title-group">
+          <strong>{preview.name}</strong>
+          <span title={preview.path}>{preview.path}</span>
+        </div>
+        <div className="preview-actions">
+          {preview.kind === 'text' && (
+            <>
+              <label className="preview-select-wrap">
+                <span className="sr-only">语言</span>
+                <select
+                  className="preview-select"
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value)}
+                >
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div
+                className="preview-settings-wrap"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className={`btn sm${settingsOpen ? ' active' : ''}`}
+                  onClick={() => setSettingsOpen((current) => !current)}
+                >
+                  输入设置
+                </button>
+                {settingsOpen && (
+                  <div className="preview-settings-menu">
+                    <label className="preview-setting-item checkbox">
+                      <input
+                        type="checkbox"
+                        checked={wordWrap}
+                        onChange={(event) => setWordWrap(event.target.checked)}
+                      />
+                      <span>自动换行</span>
+                    </label>
+                    <label className="preview-setting-item">
+                      <span>Tab 宽度</span>
+                      <select
+                        className="preview-select"
+                        value={String(tabSize)}
+                        onChange={(event) => setTabSize(Number(event.target.value))}
+                      >
+                        <option value="2">2</option>
+                        <option value="4">4</option>
+                        <option value="8">8</option>
+                      </select>
+                    </label>
+                    <label className="preview-setting-item checkbox">
+                      <input
+                        type="checkbox"
+                        checked={insertSpaces}
+                        onChange={(event) => setInsertSpaces(event.target.checked)}
+                      />
+                      <span>空格缩进</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn sm primary"
+                onClick={() => void handleSave()}
+                disabled={!dirty || saving}
+              >
+                {saving ? '保存中' : dirty ? '保存' : '已保存'}
+              </button>
+            </>
+          )}
+          <button type="button" className="btn sm" onClick={onClose}>
+            返回列表
+          </button>
+        </div>
       </div>
       <div className="preview-body">
         {preview.kind === 'text' ? (
-          <pre>{preview.content}</pre>
+          <div className="code-preview-shell">
+            <div className="code-editor-wrap">
+              <Editor
+                height="100%"
+                path={preview.path}
+                language={activeLanguage?.monaco ?? 'plaintext'}
+                theme={editorTheme}
+                value={draft}
+                onChange={(value) => setDraft(value ?? '')}
+                options={{
+                  automaticLayout: true,
+                  minimap: { enabled: false },
+                  fontFamily: 'Sarasa Mono SC, Cascadia Mono, Consolas, monospace',
+                  fontSize: 13,
+                  lineNumbersMinChars: 3,
+                  roundedSelection: false,
+                  scrollBeyondLastLine: false,
+                  wordWrap: wordWrap ? 'on' : 'off',
+                  tabSize,
+                  insertSpaces,
+                }}
+              />
+            </div>
+            <div className="code-statusbar">
+              <span>行 {lineCount}</span>
+              <span>字符 {charCount}</span>
+              <span>{activeLanguage?.label ?? '纯文本'}</span>
+            </div>
+          </div>
         ) : preview.kind === 'image' ? (
           <img src={preview.objectUrl} alt={preview.name} />
         ) : (
@@ -2673,6 +2965,116 @@ function buildCustomPalette(draft: CustomPaletteDraft): ThemePalette {
     darkSurfaceVariant: lightenHex(background, 0.1),
     custom: true,
   }
+}
+
+const LANGUAGE_OPTIONS = [
+  { id: 'kotlin', label: 'Kotlin', monaco: 'kotlin' },
+  { id: 'java', label: 'Java', monaco: 'java' },
+  { id: 'python', label: 'Python', monaco: 'python' },
+  { id: 'javascript', label: 'JavaScript', monaco: 'javascript' },
+  { id: 'typescript', label: 'TypeScript', monaco: 'typescript' },
+  { id: 'coffeescript', label: 'CoffeeScript', monaco: 'coffeescript' },
+  { id: 'rust', label: 'Rust', monaco: 'rust' },
+  { id: 'go', label: 'Go', monaco: 'go' },
+  { id: 'swift', label: 'Swift', monaco: 'swift' },
+  { id: 'dart', label: 'Dart', monaco: 'dart' },
+  { id: 'c', label: 'C', monaco: 'c' },
+  { id: 'cpp', label: 'C++', monaco: 'cpp' },
+  { id: 'cuda', label: 'CUDA (C++)', monaco: 'cpp' },
+  { id: 'csharp', label: 'C#', monaco: 'csharp' },
+  { id: 'php', label: 'PHP', monaco: 'php' },
+  { id: 'ruby', label: 'Ruby', monaco: 'ruby' },
+  { id: 'perl', label: 'Perl', monaco: 'perl' },
+  { id: 'shell', label: 'Shell', monaco: 'shell' },
+  { id: 'markdown', label: 'Markdown', monaco: 'markdown' },
+  { id: 'json', label: 'JSON', monaco: 'json' },
+  { id: 'yaml', label: 'YAML', monaco: 'yaml' },
+  { id: 'toml', label: 'TOML', monaco: 'ini' },
+  { id: 'ini', label: 'INI', monaco: 'ini' },
+  { id: 'xml', label: 'XML / HTML', monaco: 'xml' },
+  { id: 'css', label: 'CSS', monaco: 'css' },
+  { id: 'sql', label: 'SQL', monaco: 'sql' },
+  { id: 'cmake', label: 'CMake', monaco: 'plaintext' },
+  { id: 'plaintext', label: '纯文本', monaco: 'plaintext' },
+] as const
+
+const LANGUAGE_BY_FILENAME: Record<string, string> = {
+  'cmakelists.txt': 'cmake',
+}
+
+const LANGUAGE_BY_EXT: Record<string, string> = {
+  kt: 'kotlin',
+  kts: 'kotlin',
+  java: 'java',
+  py: 'python',
+  pyw: 'python',
+  pyi: 'python',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  coffee: 'coffeescript',
+  rs: 'rust',
+  go: 'go',
+  swift: 'swift',
+  dart: 'dart',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  'c++': 'cpp',
+  hpp: 'cpp',
+  hh: 'cpp',
+  hxx: 'cpp',
+  cu: 'cuda',
+  cuh: 'cuda',
+  cuda: 'cuda',
+  cs: 'csharp',
+  php: 'php',
+  rb: 'ruby',
+  pl: 'perl',
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  fish: 'shell',
+  ksh: 'shell',
+  md: 'markdown',
+  markdown: 'markdown',
+  mdx: 'markdown',
+  json: 'json',
+  json5: 'json',
+  jsonl: 'json',
+  ndjson: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
+  ini: 'ini',
+  conf: 'ini',
+  cfg: 'ini',
+  properties: 'ini',
+  xml: 'xml',
+  html: 'xml',
+  htm: 'xml',
+  xhtml: 'xml',
+  svg: 'xml',
+  css: 'css',
+  scss: 'css',
+  less: 'css',
+  sql: 'sql',
+  cmake: 'cmake',
+}
+
+function detectPreviewLanguage(fileName: string) {
+  const lower = fileName.toLowerCase()
+  const ext = lower.includes('.') ? lower.split('.').pop() ?? '' : ''
+  return LANGUAGE_BY_FILENAME[lower] ?? LANGUAGE_BY_EXT[ext] ?? 'plaintext'
+}
+
+function languageOptionFor(language: string) {
+  return LANGUAGE_OPTIONS.find((option) => option.id === language)
 }
 
 export default App

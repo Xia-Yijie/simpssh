@@ -28,6 +28,9 @@ import uniffi.simpssh_core.TerminalView
 import java.util.UUID
 import java.nio.charset.StandardCharsets
 
+private const val STARTUP_DRAIN_IDLE_MS = 80
+private const val STARTUP_DRAIN_MAX_MS = 500L
+
 class TabState(
     val id: String = UUID.randomUUID().toString(),
     val server: Server,
@@ -106,6 +109,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
             withContext(Dispatchers.Main) { tab.shellStatus = STATUS_CONNECTED }
 
             runInitScripts(s, tab.script)
+            drainStartupOutput(s)
             tab.readerJob = scope.launch(Dispatchers.IO) { runReader(tab, s, t) }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) { tab.shellStatus = formatError("连接", e) }
@@ -122,6 +126,15 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
                 .forEach { line ->
                     runCatching { s.write((line + "\r").toByteArray(StandardCharsets.UTF_8)) }
                 }
+        }
+    }
+
+    private fun drainStartupOutput(s: SshSession) {
+        val startedAt = System.currentTimeMillis()
+        while (true) {
+            val chunk = runCatching { s.read(STARTUP_DRAIN_IDLE_MS) }.getOrDefault(ByteArray(0))
+            if (chunk.isEmpty()) break
+            if (System.currentTimeMillis() - startedAt >= STARTUP_DRAIN_MAX_MS) break
         }
     }
 

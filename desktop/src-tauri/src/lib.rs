@@ -20,6 +20,8 @@ const EV_CHUNK: &str = "download-chunk";
 const EV_DONE: &str = "download-done";
 const EV_ERROR: &str = "download-error";
 const EV_CANCELLED: &str = "download-cancelled";
+const STARTUP_DRAIN_IDLE_MS: u32 = 80;
+const STARTUP_DRAIN_MAX_MS: u32 = 500;
 
 #[derive(Default)]
 struct SessionStore {
@@ -222,11 +224,12 @@ async fn connect_session(
             }),
         );
 
-        spawn_reader(app, sessions.clone(), session_id.clone(), ssh.clone());
-
         if let Some(script) = request.init_script.as_ref() {
-            run_init_script(ssh, script)?;
+            run_init_script(ssh.clone(), script)?;
+            drain_startup_output(&ssh);
         }
+
+        spawn_reader(app, sessions.clone(), session_id.clone(), ssh);
 
         Ok(ConnectReply {
             session_id,
@@ -631,6 +634,19 @@ fn run_init_script(ssh: Arc<SshSession>, script: &InitScriptRequest) -> Result<(
     }
 
     Ok(())
+}
+
+fn drain_startup_output(ssh: &SshSession) {
+    let start = std::time::Instant::now();
+    loop {
+        let chunk = ssh.read(STARTUP_DRAIN_IDLE_MS);
+        if chunk.is_empty() {
+            break;
+        }
+        if start.elapsed().as_millis() >= u128::from(STARTUP_DRAIN_MAX_MS) {
+            break;
+        }
+    }
 }
 
 fn resolve_root_path(home_dir: &str, working_dir: &str) -> String {
