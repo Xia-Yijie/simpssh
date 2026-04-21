@@ -937,7 +937,16 @@ private val TERM_PAD = 4.dp
 
 // EAW-Ambiguous 字形:Sarasa Mono 按 2 个 cell 的 advance 渲染,但 alacritty 的网格里算 1 个 cell。
 // 这里居中绘制 + 裁剪到 1-cell 槽位,让网格数学和可见像素一致(属于 Sarasa ink 与 alacritty 网格宽度的已知不一致)。
-private val AMBIG_WIDE_GLYPHS = setOf(0x2014, 0x2015, 0x2026)
+// 只对 cellWidth==1 的字符生效:下方 check 已显式守卫,所以收录范围可以放宽。
+private fun isAmbigWideGlyph(codePoint: Int): Boolean = when (codePoint) {
+    0x2014, 0x2015, 0x2026 -> true // em-dash / horizontal bar / ellipsis
+    in 0x2190..0x21FF,             // 箭头
+    in 0x2600..0x26FF,             // Miscellaneous Symbols
+    in 0x2700..0x27BF,             // Dingbats(含 ✓ ✗ 等)
+    in 0x2B00..0x2BFF,             // Miscellaneous Symbols and Arrows
+    -> true
+    else -> false
+}
 
 // 必须与 `core/src/terminal.rs` 的 DEFAULT_FG / DEFAULT_BG 保持一致
 // (DEFAULT_FG = 0xD3D7CF, DEFAULT_BG = 0x000000)。fg/bg 等于这两个值的 cell 会被当作
@@ -1040,7 +1049,9 @@ private fun TerminalRowCanvas(
                 textDecoration = glyph.style.textDecoration,
             )
             val cp = Character.codePointAt(glyph.text, 0)
-            if (cp in AMBIG_WIDE_GLYPHS) {
+            // cellWidth==1 的守卫:isAmbigWideGlyph 覆盖的箭头/符号/dingbats 范围
+            // 也包含部分 Wide 字符(✅ ⭐ 等),它们已经按 2 格画,不需要再裁剪。
+            if (glyph.cellWidth == 1 && isAmbigWideGlyph(cp)) {
                 clipRect(
                     left = cellX, top = 0f,
                     right = cellX + widthPx, bottom = size.height,
@@ -1365,6 +1376,9 @@ private fun textOffsetToCellIndex(text: String, utf16Offset: Int): Int {
 }
 
 private fun codePointCellWidth(codePoint: Int): Int {
+    // 热路径:ASCII + Latin-1 (< 0x0300) 都是 1-cell 且没有组合记号,直接返回。
+    // 0x0300 以下覆盖拉丁字母、数字、常用标点,是终端输出的绝大多数。
+    if (codePoint < 0x0300) return 1
     if (Character.getType(codePoint) == Character.NON_SPACING_MARK.toInt() ||
         Character.getType(codePoint) == Character.ENCLOSING_MARK.toInt() ||
         Character.getType(codePoint) == Character.COMBINING_SPACING_MARK.toInt() ||
@@ -1380,6 +1394,42 @@ private fun codePointCellWidth(codePoint: Int): Int {
         // ——渲染器会把它们居中并裁剪到 1-cell 槽位里。
         // 下一行的 two/three-em dashes 属于 EAW Wide,因此占 2 cell。
         codePoint in 0x2E3A..0x2E3B -> 2
+        // Misc Technical / Dingbats / Misc Symbols / Misc Symbols & Arrows 里
+        // 按 EAW Wide 的散点(✅ ⭐ ❓ ❗ ⚠️ 等 emoji-like 符号)。漏掉会导致
+        // alacritty 给 2 cell 我画 1 cell,整行排版错位。
+        codePoint in 0x231A..0x231B ||
+        codePoint in 0x23E9..0x23EC ||
+        codePoint == 0x23F0 ||
+        codePoint == 0x23F3 ||
+        codePoint in 0x25FD..0x25FE ||
+        codePoint in 0x2614..0x2615 ||
+        codePoint in 0x2648..0x2653 ||
+        codePoint == 0x267F ||
+        codePoint == 0x2693 ||
+        codePoint == 0x26A1 ||
+        codePoint in 0x26AA..0x26AB ||
+        codePoint in 0x26BD..0x26BE ||
+        codePoint in 0x26C4..0x26C5 ||
+        codePoint == 0x26CE ||
+        codePoint == 0x26D4 ||
+        codePoint == 0x26EA ||
+        codePoint in 0x26F2..0x26F3 ||
+        codePoint == 0x26F5 ||
+        codePoint == 0x26FA ||
+        codePoint == 0x26FD ||
+        codePoint == 0x2705 ||
+        codePoint in 0x270A..0x270B ||
+        codePoint == 0x2728 ||
+        codePoint == 0x274C ||
+        codePoint == 0x274E ||
+        codePoint in 0x2753..0x2755 ||
+        codePoint == 0x2757 ||
+        codePoint in 0x2795..0x2797 ||
+        codePoint == 0x27B0 ||
+        codePoint == 0x27BF ||
+        codePoint in 0x2B1B..0x2B1C ||
+        codePoint == 0x2B50 ||
+        codePoint == 0x2B55 -> 2
         codePoint in 0x1100..0x115F ||
         codePoint in 0x2329..0x232A ||
         codePoint in 0x2E80..0xA4CF ||

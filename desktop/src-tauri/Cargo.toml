@@ -1,6 +1,6 @@
 [package]
 name = "simpssh-desktop"
-version = "0.6.13"
+version = "0.6.14"
 description = "Windows desktop shell for simpssh"
 edition = "2021"
 
