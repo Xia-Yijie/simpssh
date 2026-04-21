@@ -28,7 +28,7 @@ import uniffi.simpssh_core.TerminalView
 import java.util.UUID
 import java.nio.charset.StandardCharsets
 
-private const val STARTUP_DRAIN_IDLE_MS = 80
+private const val STARTUP_DRAIN_IDLE_MS: UInt = 80u
 private const val STARTUP_DRAIN_MAX_MS = 500L
 
 class TabState(
