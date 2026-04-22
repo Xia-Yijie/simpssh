@@ -13,7 +13,7 @@ internal const val TYPING_GAP_MS: Long = 50L
 internal val KEYWORD_TRAP_SET: Set<String> = setOf(
     "up", "down", "left", "right",
     "tab", "enter", "return", "space", "backspace",
-    "escape", "esc", "delete",
+    "escape", "esc", "delete", "clear",
     "home", "end", "pageup", "pagedown",
     "f1", "f2", "f3", "f4", "f5", "f6",
     "f7", "f8", "f9", "f10", "f11", "f12",

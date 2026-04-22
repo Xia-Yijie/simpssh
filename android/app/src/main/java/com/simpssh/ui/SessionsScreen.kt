@@ -32,8 +32,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,6 +52,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -123,9 +125,14 @@ fun SessionsScreen(
         if (manager.tabs.isEmpty()) onHome()
     }
 
-    // 切 tab 时强制收键盘,避免新 tab 继承旧 tab 的 shrunk viewport + IME 动画被打断。
+    // 切 tab 时强制收键盘。先 clearFocus 摘掉 BasicTextField 的焦点,
+    // 否则有些 ROM 在 hide 后会马上因焦点仍在输入框而再弹起来。
     val imeController = LocalSoftwareKeyboardController.current
-    LaunchedEffect(activeId) { imeController?.hide() }
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(activeId) {
+        focusManager.clearFocus(force = true)
+        imeController?.hide()
+    }
 
 
     val window = (androidx.compose.ui.platform.LocalContext.current as? android.app.Activity)?.window
@@ -151,7 +158,9 @@ fun SessionsScreen(
             )
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding).imePadding()) {
+        // 用 imeAnimationTarget 而非 ime:布局直接采纳"动画结束后"的 inset,
+        // 动画中不再逐帧重新 measure+layout,避免跨 cell 边界导致 ShellBody 反复重组。
+        Box(modifier = Modifier.fillMaxSize().padding(padding).windowInsetsPadding(WindowInsets.imeAnimationTarget)) {
             if (active != null) {
                 SessionBody(
                     tab = active,
@@ -450,20 +459,25 @@ private fun ShellBody(
             w to h
         }
 
-        var contentSize by remember(tab.id) { mutableStateOf(IntSize.Zero) }
+        // viewportSize 不按 tab.id 重置:同一个 terminal viewport,切 tab 不该清零。
+        // 若按 tab.id 重置,切 tab 后 onSizeChanged 的 previousSize(LayoutNode 复用)
+        // 仍是上一个 tab 测出的尺寸,同尺寸不触发回调,导致 contentSize 卡在 0。
+        var viewportSize by remember { mutableStateOf(IntSize.Zero) }
         // 重组只在整数 cell 边界跨越时触发,IME 动画逐像素变化不会每帧重组 ShellBody。
         val cols by remember(charW) {
             derivedStateOf {
                 // -1 吸收亚像素布局松弛,否则最右一格会被 `clipToBounds` 裁掉。
-                if (charW > 0f) ((contentSize.width / charW).toInt() - 1).coerceAtLeast(0) else 0
+                if (charW > 0f) ((viewportSize.width / charW).toInt() - 1).coerceAtLeast(0) else 0
             }
         }
         val rows by remember(charH) {
             derivedStateOf {
-                if (charH > 0f) (contentSize.height / charH).toInt() else 0
+                if (charH > 0f) (viewportSize.height / charH).toInt() else 0
             }
         }
-        LaunchedEffect(cols, rows) {
+        // tab.id 进 key:切 tab 时即便 cols/rows 与前一个 tab 相同也强制对新 tab 再 reconcile 一次,
+        // 否则 SessionManager 里 tab.cols 和真实尺寸一旦错位(比如另一个 tab 开过键盘缩过)就没人能纠正。
+        LaunchedEffect(tab.id, cols, rows) {
             // 初次测量可能给出极小值(布局 pass 还没跑完);给 pty 发这种尺寸没意义。
             if (cols >= 20 && rows >= 5) {
                 manager.resizeTerminal(tab.id, cols.toUShort(), rows.toUShort())
@@ -483,6 +497,7 @@ private fun ShellBody(
                 .background(termBg)
                 .padding(TERM_PAD)
                 .clipToBounds()
+                .onSizeChanged { viewportSize = it }
                 .terminalGestures(
                     key = tab.id,
                     charW = { charWLatest },
@@ -539,9 +554,7 @@ private fun ShellBody(
             LazyColumn(
                 state = listState,
                 userScrollEnabled = false,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onSizeChanged { contentSize = it },
+                modifier = Modifier.fillMaxSize(),
             ) {
                 itemsIndexed(tab.rows) { i, row ->
                     TerminalRowCanvas(

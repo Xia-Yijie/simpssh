@@ -109,7 +109,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
             withContext(Dispatchers.Main) { tab.shellStatus = STATUS_CONNECTED }
 
             runInitScripts(s, tab.script)
-            drainStartupOutput(s)
+            drainStartupOutput(tab, s, t)
             tab.readerJob = scope.launch(Dispatchers.IO) { runReader(tab, s, t) }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) { tab.shellStatus = formatError("连接", e) }
@@ -129,13 +129,18 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         }
     }
 
-    private fun drainStartupOutput(s: SshSession) {
+    // 启动阶段(motd / init script 回显 / 首个 prompt)的字节必须 feed 给 term,
+    // 否则 runReader 要等用户下一次输入才会 snapshot,用户会看到一片空白进终端。
+    // 最后做一次 publishSnapshot 让 UI 先看到 prompt。
+    private suspend fun drainStartupOutput(tab: TabState, s: SshSession, t: TerminalView) {
         val startedAt = System.currentTimeMillis()
         while (true) {
             val chunk = runCatching { s.read(STARTUP_DRAIN_IDLE_MS) }.getOrDefault(ByteArray(0))
             if (chunk.isEmpty()) break
+            t.feed(chunk)
             if (System.currentTimeMillis() - startedAt >= STARTUP_DRAIN_MAX_MS) break
         }
+        publishSnapshot(tab, s, t)
     }
 
     // 局部 s/t:重连会替换 tab.sshSession/tab.term,防止旧循环写入新会话缓冲。
@@ -144,11 +149,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
             val chunk = runCatching { s.read(SHELL_READ_TIMEOUT_MS) }.getOrNull() ?: break
             if (chunk.isNotEmpty()) {
                 t.feed(chunk)
-                withContext(Dispatchers.Main) {
-                    if (tab.sshSession !== s) return@withContext
-                    applySnapshotToTab(tab, t.snapshotStyled())
-                    applyCursorToTab(tab, t.cursor())
-                }
+                publishSnapshot(tab, s, t)
             } else if (s.isClosed()) {
                 triggerReconnect(tab)
                 break
@@ -238,13 +239,26 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
                 val d = tab.pendingScrollDelta
                 tab.pendingScrollDelta = 0
                 val t = tab.term ?: break
-                val moved = withContext(Dispatchers.IO) { t.scrollDisplay(d) }
-                if (!moved) continue
-                val snap = withContext(Dispatchers.IO) { t.snapshotStyled() }
-                val cur = withContext(Dispatchers.IO) { t.cursor() }
+                // 一次 IO 切换跑完 scroll + snapshot + cursor,避免三次 dispatch 跳跃。
+                val (snap, cur) = withContext(Dispatchers.IO) {
+                    if (t.scrollDisplay(d)) t.snapshotStyled() to t.cursor() else null
+                } ?: continue
                 applySnapshotToTab(tab, snap)
                 applyCursorToTab(tab, cur)
             }
+        }
+    }
+
+    // snapshot/cursor 持 term mutex + 扫整个 grid,读在 IO 上;Main 只做 SnapshotState 写入。
+    // `sshSession !== s` 哨兵:调用方启动协程后若发生重连(tab.sshSession 被换),
+    // 旧的 snapshot 不能再落到新会话对应的 UI 状态上。
+    private suspend fun publishSnapshot(tab: TabState, s: SshSession, t: TerminalView) {
+        val snap = t.snapshotStyled()
+        val cur = t.cursor()
+        withContext(Dispatchers.Main) {
+            if (tab.sshSession !== s) return@withContext
+            applySnapshotToTab(tab, snap)
+            applyCursorToTab(tab, cur)
         }
     }
 
@@ -283,8 +297,12 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         tab.pendingRemoteResize?.cancel()
         tab.pendingRemoteResize = scope.launch(Dispatchers.IO) {
             delay(REMOTE_RESIZE_COALESCE_MS)
-            tab.term?.resize(cols, rows)
+            val t = tab.term ?: return@launch
+            t.resize(cols, rows)
             runCatching { s.resize(cols, rows) }
+            // Claude Code / Ink 等 TUI idle 时对 SIGWINCH 不回数据,runReader 不会
+            // 主动 snapshot,viewport 变大后下半会一直空到 shell 再输出为止。
+            publishSnapshot(tab, s, t)
         }
     }
 
