@@ -1,17 +1,18 @@
-//! 安全警告:本模块使用 AcceptAny 处理 host key,等于完全关闭 TOFU 校验,
-//! 对任何中间人攻击都是开放的。这是 MVP 阶段的占位方案,上线前必须换成
-//! known_hosts 风格的指纹校验,否则不得发布。
-
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::client;
-use russh::{ChannelId, ChannelMsg, Disconnect};
+use russh::{ChannelMsg, Disconnect};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
-use crate::auth::AcceptAny;
+use crate::auth::SessionHandler;
+use crate::forwarding::{
+    new_stats, snapshot, start_local_forward, start_remote_forward, ForwardEntry, ForwardStats,
+    RemoteForwardMap, LOOPBACK,
+};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum SshError {
@@ -21,6 +22,8 @@ pub enum SshError {
     Auth { msg: String },
     #[error("shell failed: {msg}")]
     Shell { msg: String },
+    #[error("forward failed: {msg}")]
+    Forward { msg: String },
     #[error("session closed")]
     Closed,
 }
@@ -38,10 +41,15 @@ enum ActorCmd {
 }
 
 struct SessionInner {
-    _runtime: Runtime,
+    // runtime 在 SessionInner 的字段末尾,按 Rust 字段析构顺序(反向)最先被 drop:
+    // forwards / session 里的 tokio 任务随之一并取消,避免监听 socket 泄漏占端口。
     cmd_tx: mpsc::UnboundedSender<ActorCmd>,
     rx: Mutex<mpsc::UnboundedReceiver<Vec<u8>>>,
     closed: Arc<AtomicBool>,
+    session: Arc<client::Handle<SessionHandler>>,
+    remote_forwards: Arc<Mutex<RemoteForwardMap>>,
+    forwards: Arc<Mutex<HashMap<String, ForwardEntry>>>,
+    runtime: Runtime,
 }
 
 #[derive(uniffi::Object)]
@@ -70,8 +78,10 @@ impl SshSession {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<ActorCmd>();
         let closed = Arc::new(AtomicBool::new(false));
         let closed_actor = closed.clone();
+        let remote_forwards: Arc<Mutex<RemoteForwardMap>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
-        rt.block_on(async {
+        let session_arc = rt.block_on(async {
             // 不设 inactivity_timeout,改用 keepalive:30s 发一次,允许丢 3 次,
             // 累计 ~90s 才判死。移动网络短时断连很常见,这个窗口可以扛住地铁/电梯
             // 级别的抖动而不误杀会话,又不会让用户在真正掉线时等太久。
@@ -80,7 +90,8 @@ impl SshSession {
                 keepalive_max: 3,
                 ..Default::default()
             });
-            let mut session = client::connect(config, (host.as_str(), port), AcceptAny)
+            let handler = SessionHandler::new(remote_forwards.clone());
+            let mut session = client::connect(config, (host.as_str(), port), handler)
                 .await
                 .map_err(|e| SshError::Connect { msg: e.to_string() })?;
 
@@ -120,17 +131,26 @@ impl SshSession {
                 .await
                 .map_err(|e| SshError::Shell { msg: e.to_string() })?;
 
-            let id: ChannelId = channel.id();
-            tokio::spawn(run_actor(session, channel, id, cmd_rx, bytes_tx, closed_actor));
-            Ok::<(), SshError>(())
+            let session_arc = Arc::new(session);
+            tokio::spawn(run_actor(
+                session_arc.clone(),
+                channel,
+                cmd_rx,
+                bytes_tx,
+                closed_actor,
+            ));
+            Ok::<Arc<client::Handle<SessionHandler>>, SshError>(session_arc)
         })?;
 
         Ok(Arc::new(Self {
             inner: SessionInner {
-                _runtime: rt,
                 cmd_tx,
                 rx: Mutex::new(bytes_rx),
                 closed,
+                session: session_arc,
+                remote_forwards,
+                forwards: Arc::new(Mutex::new(HashMap::new())),
+                runtime: rt,
             },
         }))
     }
@@ -155,23 +175,20 @@ impl SshSession {
         if !out.is_empty() {
             return out;
         }
-        let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms as u64);
-        loop {
-            match rx.try_recv() {
-                Ok(c) => {
-                    out.extend_from_slice(&c);
-                    while let Ok(more) = rx.try_recv() {
-                        out.extend_from_slice(&more);
-                    }
-                    return out;
-                }
-                Err(mpsc::error::TryRecvError::Empty) => {
-                    if std::time::Instant::now() >= deadline { return out; }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(mpsc::error::TryRecvError::Disconnected) => return out,
+        // 无数据时阻塞到 timeout_ms 或收到第一块;之前手写 10ms 忙等每个空 read 会醒
+        // 20 次,现在走 tokio 定时器,闲置时零唤醒。拿到第一块后再 try_recv 榨干队列,
+        // 减少 JNI 往返次数。
+        let wait = Duration::from_millis(timeout_ms as u64);
+        let first = self.inner.runtime.block_on(async {
+            tokio::time::timeout(wait, rx.recv()).await.ok().flatten()
+        });
+        if let Some(c) = first {
+            out.extend_from_slice(&c);
+            while let Ok(more) = rx.try_recv() {
+                out.extend_from_slice(&more);
             }
         }
+        out
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), SshError> {
@@ -181,15 +198,100 @@ impl SshSession {
             .map_err(|_| SshError::Closed)
     }
 
+    // 本地端口转发:设备本地 127.0.0.1:bind_port 监听,来连接经 SSH direct-tcpip 打到
+    // 服务端的 127.0.0.1:target_port。id 由调用方维护,相同 id 重复调用会顶掉旧条目。
+    pub fn start_local_forward(
+        &self,
+        id: String,
+        bind_port: u16,
+        target_port: u16,
+    ) -> Result<(), SshError> {
+        let session = self.inner.session.clone();
+        let stats = new_stats();
+        let task_stats = stats.clone();
+        let task = self
+            .inner
+            .runtime
+            .block_on(async move {
+                start_local_forward(session, bind_port, target_port, task_stats).await
+            })
+            .map_err(|e| SshError::Forward { msg: e.to_string() })?;
+        let mut map = self.inner.forwards.lock().unwrap();
+        map.insert(id, ForwardEntry::Local { task, stats });
+        Ok(())
+    }
+
+    // 远端端口转发:向服务端 tcpip_forward 注册 127.0.0.1:bind_port,
+    // 服务端接受连接后推过来 forwarded-tcpip channel(见 SessionHandler),
+    // 连到设备本地 127.0.0.1:target_port。返回服务端实际绑定端口(请求 0 时由服务端分配)。
+    pub fn start_remote_forward(
+        &self,
+        id: String,
+        bind_port: u16,
+        target_port: u16,
+    ) -> Result<u16, SshError> {
+        let session = self.inner.session.clone();
+        let remote_forwards = self.inner.remote_forwards.clone();
+        let stats = new_stats();
+        let stats_task = stats.clone();
+        let effective = self
+            .inner
+            .runtime
+            .block_on(async move {
+                start_remote_forward(
+                    session,
+                    remote_forwards,
+                    bind_port,
+                    target_port,
+                    stats_task,
+                )
+                .await
+            })
+            .map_err(|e| SshError::Forward { msg: e.to_string() })?;
+        let mut map = self.inner.forwards.lock().unwrap();
+        map.insert(
+            id,
+            ForwardEntry::Remote {
+                bind_port: effective as u32,
+                stats,
+            },
+        );
+        Ok(effective)
+    }
+
+    pub fn stop_forward(&self, id: String) {
+        let entry = self.inner.forwards.lock().unwrap().remove(&id);
+        let Some(entry) = entry else { return };
+        if let ForwardEntry::Remote { bind_port, .. } = &entry {
+            // 同步从 remote_forwards 移除:若调用方随即用同 id 重新上架,避免后面 async
+            // cancel 的 remove 误删新注册。cancel_tcpip_forward 本身继续异步跑。
+            let port = *bind_port;
+            self.inner.remote_forwards.lock().unwrap().remove(&port);
+            let session = self.inner.session.clone();
+            self.inner.runtime.spawn(async move {
+                let _ = session.cancel_tcpip_forward(LOOPBACK, port).await;
+            });
+        }
+        // entry 走出作用域,Local::task 被 abort。
+    }
+
+    // UI 轮询用:读出当前规则的统计 + 最近一条事件文字。未注册或已停返回 None。
+    pub fn get_forward_stats(&self, id: String) -> Option<ForwardStats> {
+        let map = self.inner.forwards.lock().unwrap();
+        map.get(&id).map(|e| snapshot(&e.stats()))
+    }
+
     pub fn disconnect(&self) {
+        // 先清转发:ForwardEntry::Drop 会 abort TcpListener 任务,立刻释放本地端口。
+        // 否则老监听还活着,下一次重连 bind 同一端口会 EADDRINUSE。
+        self.inner.forwards.lock().unwrap().clear();
         let _ = self.inner.cmd_tx.send(ActorCmd::Close);
     }
 }
 
 async fn run_actor(
-    session: client::Handle<AcceptAny>,
+    session: Arc<client::Handle<SessionHandler>>,
     mut channel: russh::Channel<client::Msg>,
-    _id: ChannelId,
     mut cmd_rx: mpsc::UnboundedReceiver<ActorCmd>,
     bytes_tx: mpsc::UnboundedSender<Vec<u8>>,
     closed: Arc<AtomicBool>,

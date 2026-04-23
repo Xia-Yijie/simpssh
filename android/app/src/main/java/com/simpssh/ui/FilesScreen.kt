@@ -95,7 +95,19 @@ fun FilesBody(tab: TabState, manager: SessionManager) {
                 ctx.contentResolver.openOutputStream(uri)
                     ?: throw java.io.IOException("openOutputStream returned null")
             },
-        ) { total ->
+        ) { notifier, id, total ->
+            // 通知 tap 用系统默认 app 打开下载好的文件。mime 由 ContentResolver 给,
+            // 拿不到(.bin 之类)时兜底 */*,让 Android 弹选择器。
+            val mime = ctx.contentResolver.getType(uri) ?: "*/*"
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val pi = android.app.PendingIntent.getActivity(
+                ctx, id, viewIntent,
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            notifier.done(id, target.name, total, contentIntent = pi, tapHint = "点击打开")
             withContext(Dispatchers.Main) { tab.filesStatus = "已下载 ${target.name} (${humanBytes(total)})" }
         }
     }
@@ -413,15 +425,6 @@ private fun FilesStatusBanner(
     }
 }
 
-internal fun humanBytes(n: Long): String {
-    if (n < 1024L) return "$n B"
-    val kb = n / 1024L
-    if (kb < 1024L) return "$kb KB"
-    val mb = kb / 1024L
-    if (mb < 1024L) return "$mb MB"
-    return "${mb / 1024L} GB"
-}
-
 @Composable
 private fun PlaceholderRow(text: String, depth: Int) {
     Row(
@@ -674,16 +677,6 @@ private fun flattenTree(tab: TabState, path: String, depth: Int): List<TreeRow> 
     return out
 }
 
-internal fun decodeText(bytes: ByteArray): String {
-    return try {
-        val s = bytes.toString(Charsets.UTF_8)
-        val bad = s.count { it == '\uFFFD' }
-        if (bad > s.length / 50) "（二进制文件，长度 ${bytes.size} 字节）" else s
-    } catch (_: Exception) {
-        "（二进制文件，长度 ${bytes.size} 字节）"
-    }
-}
-
 private fun queryDisplayName(ctx: android.content.Context, uri: Uri): String? {
     return runCatching {
         ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
@@ -711,10 +704,7 @@ private fun stageAndInstallApk(
         errorLabel = "下载",
         openOutput = { java.io.FileOutputStream(apkFile) },
         onFailure = { apkFile.delete() },
-    ) { total ->
-        withContext(Dispatchers.Main) {
-            tab.filesStatus = "已下载 ${entry.name} (${humanBytes(total)})，启动安装…"
-        }
+    ) { notifier, id, total ->
         val uri = FileProvider.getUriForFile(
             ctx, ctx.packageName + FILE_PROVIDER_AUTHORITY_SUFFIX, apkFile,
         )
@@ -722,12 +712,22 @@ private fun stageAndInstallApk(
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        runCatching { ctx.startActivity(intent) }.onFailure { e ->
-            withContext(Dispatchers.Main) { tab.filesStatus = formatError("启动安装器", e) }
+        // 通知 tap 作为后台下载完成的 user-gesture 入口:Android 10+ 从后台直接 startActivity
+        // 会被静默丢弃,必须走通知路径。id 与进度通知复用,相当于把"下载中"换成"点击安装"。
+        val pi = android.app.PendingIntent.getActivity(
+            ctx, id, intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        notifier.done(id, entry.name, total, contentIntent = pi, tapHint = "点击安装")
+        withContext(Dispatchers.Main) {
+            tab.filesStatus = "已下载 ${entry.name} (${humanBytes(total)})，启动安装…"
         }
+        // 前台场景直接起安装器,省一次 tap。后台时此调用会被系统屏蔽,用户从通知进入即可。
+        runCatching { ctx.startActivity(intent) }
     }
 }
 
+// onComplete 收到 (notifier, id, total);caller 自己决定 done 通知的文案/tap 行为。
 private fun streamWithProgress(
     manager: SessionManager,
     tab: TabState,
@@ -737,7 +737,7 @@ private fun streamWithProgress(
     errorLabel: String,
     openOutput: () -> java.io.OutputStream,
     onFailure: () -> Unit = {},
-    onComplete: suspend (Long) -> Unit,
+    onComplete: suspend (notifier: DownloadNotifier, id: Int, total: Long) -> Unit,
 ) {
     val notifier = manager.newDownloadNotifier()
     val notifId = DownloadNotifier.nextId()
@@ -774,8 +774,7 @@ private fun streamWithProgress(
             notifier.error(notifId, entry.name, e.message ?: e.javaClass.simpleName)
             return@launchFileOp
         }
-        notifier.done(notifId, entry.name, total)
-        onComplete(total)
+        onComplete(notifier, notifId, total)
     }
 }
 

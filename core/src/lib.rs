@@ -1,6 +1,7 @@
 uniffi::setup_scaffolding!();
 
 mod auth;
+mod forwarding;
 mod sftp;
 mod ssh;
 mod terminal;

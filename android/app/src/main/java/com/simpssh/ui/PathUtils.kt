@@ -44,6 +44,27 @@ internal fun parentOf(p: String): String {
 internal fun formatError(action: String, err: Throwable?): String =
     "${action}失败: ${err?.message ?: "未知错误"}"
 
+// 对齐的 1024 基阶梯展示:B/KB/MB/GB。> 1 GB 场景少,不追求 TB 精度。
+internal fun humanBytes(n: Long): String {
+    if (n < 1024L) return "$n B"
+    val kb = n / 1024L
+    if (kb < 1024L) return "$kb KB"
+    val mb = kb / 1024L
+    if (mb < 1024L) return "$mb MB"
+    return "${mb / 1024L} GB"
+}
+
+// 尝试按 UTF-8 解码;替换字符超过 2% 认定是二进制并返回占位说明。code viewer 走这条。
+internal fun decodeText(bytes: ByteArray): String {
+    return try {
+        val s = bytes.toString(Charsets.UTF_8)
+        val bad = s.count { it == '\uFFFD' }
+        if (bad > s.length / 50) "（二进制文件，长度 ${bytes.size} 字节）" else s
+    } catch (_: Exception) {
+        "（二进制文件，长度 ${bytes.size} 字节）"
+    }
+}
+
 internal suspend fun reportFilesError(
     tab: TabState,
     action: String,

@@ -304,8 +304,9 @@ impl SftpSession {
         })
     }
 
-    pub fn disconnect(&self) {
-    }
+    // 真正清理依赖 Drop:runtime 释放时 sftp-client task 和 ssh channel 自然收尾。
+    // 保留此方法是为了让 Kotlin 侧与 SshSession.disconnect 对称调用,便于读 SessionManager 流程。
+    pub fn disconnect(&self) {}
 }
 
 struct OpenFileInner {

@@ -13,6 +13,23 @@ data class InitScript(
     val content: String,
 )
 
+enum class ForwardKind { Push, Pull }
+
+// SSH 端口转发规则。两侧地址都固定 127.0.0.1,用户只配端口。
+// Pull(对应 ssh -L):本机 127.0.0.1:bindPort 监听,流量经 SSH 到服务端 127.0.0.1:targetPort。
+//                    语义:从服务端"拉"东西过来,手机上 localhost:bindPort 等价于服务端 localhost:targetPort。
+// Push(对应 ssh -R):服务端 127.0.0.1:bindPort 监听(需服务端 AllowTcpForwarding),
+//                    流量经 SSH 回到本机 127.0.0.1:targetPort。
+//                    语义:把手机上的服务"推"到服务端,服务端上 localhost:bindPort 等价于手机 localhost:targetPort。
+data class ForwardRule(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "",
+    val kind: ForwardKind,
+    val bindPort: Int,
+    val targetPort: Int,
+    val enabled: Boolean = true,
+)
+
 data class Server(
     val id: String = UUID.randomUUID().toString(),
     val name: String,

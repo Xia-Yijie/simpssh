@@ -115,8 +115,8 @@ impl TerminalView {
                 if !is_rendered_cell(cell.flags) {
                     continue;
                 }
-                let raw_fg = resolve_color(cell.fg, DEFAULT_FG);
-                let raw_bg = resolve_color(cell.bg, DEFAULT_BG);
+                let raw_fg = resolve_color(cell.fg);
+                let raw_bg = resolve_color(cell.bg);
                 let flags = map_flags(cell.flags);
                 // inverse 在这里就把 fg/bg 交换好,UI 侧不用再判断;否则每个平台都要重复这段逻辑。
                 let (fg, bg) = if flags & INVERSE != 0 { (raw_bg, raw_fg) } else { (raw_fg, raw_bg) };
@@ -206,7 +206,7 @@ impl TerminalView {
     }
 }
 
-fn resolve_color(c: AnsiColor, _default: u32) -> u32 {
+fn resolve_color(c: AnsiColor) -> u32 {
     match c {
         AnsiColor::Named(n) => named_color(n),
         AnsiColor::Spec(rgb) => ((rgb.r as u32) << 16) | ((rgb.g as u32) << 8) | (rgb.b as u32),

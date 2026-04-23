@@ -69,14 +69,26 @@ import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.simpssh.data.ForwardKind
+import com.simpssh.data.ForwardRule
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -143,6 +155,8 @@ fun SessionsScreen(
         }
     }
 
+    var forwardsTabId by remember { mutableStateOf<String?>(null) }
+
     MaterialTheme(colorScheme = sessionSchemeFor(LocalPalette.current)) {
     Scaffold(
         topBar = {
@@ -155,6 +169,7 @@ fun SessionsScreen(
                 onSetView = { v ->
                     manager.tabs.firstOrNull { it.id == manager.activeId }?.view = v
                 },
+                onShowForwards = { forwardsTabId = it },
             )
         },
     ) { padding ->
@@ -173,6 +188,15 @@ fun SessionsScreen(
             }
         }
     }
+    val forwardTab = manager.tabs.firstOrNull { it.id == forwardsTabId }
+    if (forwardTab != null) {
+        ForwardsDialog(
+            tab = forwardTab,
+            manager = manager,
+            showDebug = showModeBadges,
+            onDismiss = { forwardsTabId = null },
+        )
+    }
     }
 }
 
@@ -184,6 +208,7 @@ private fun CompactTopBar(
     onActivate: (String) -> Unit,
     onClose: (String) -> Unit,
     onSetView: (TabState.View) -> Unit,
+    onShowForwards: (String) -> Unit,
 ) {
     val activeId = activeTab?.id
     var menuTabId by remember { mutableStateOf<String?>(null) }
@@ -227,6 +252,13 @@ private fun CompactTopBar(
                                 },
                             )
                             DropdownMenuItem(
+                                text = { Text("端口转发") },
+                                onClick = {
+                                    menuTabId = null
+                                    onShowForwards(t.id)
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("关闭") },
                                 onClick = {
                                     menuTabId = null
@@ -267,6 +299,254 @@ private fun CompactTopBar(
                 renameTabId = null
             },
         )
+    }
+}
+
+@Composable
+private fun ForwardsDialog(
+    tab: TabState,
+    manager: SessionManager,
+    showDebug: Boolean,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 3.dp,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .heightIn(max = 640.dp)
+                .padding(vertical = 24.dp),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "端口转发",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onDismiss) { Text("关闭") }
+                }
+                HorizontalDivider()
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (tab.forwards.isEmpty()) {
+                        Text(
+                            "还没有转发规则。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        )
+                    }
+                    // Dialog 打开期间轮询 Rust 侧 stats,只在开发者选项开时才拉 + 显示。
+                    val statsMap = remember {
+                        androidx.compose.runtime.mutableStateMapOf<String, uniffi.simpssh_core.ForwardStats>()
+                    }
+                    if (showDebug) {
+                        LaunchedEffect(tab.id) {
+                            while (true) {
+                                val s = tab.sshSession
+                                if (s != null) {
+                                    tab.forwards.forEach { rule ->
+                                        val stat = runCatching { s.getForwardStats(rule.id) }.getOrNull()
+                                        if (stat != null) statsMap[rule.id] = stat
+                                        else statsMap.remove(rule.id)
+                                    }
+                                } else {
+                                    statsMap.clear()
+                                }
+                                kotlinx.coroutines.delay(FORWARD_STATS_POLL_MS)
+                            }
+                        }
+                    }
+                    tab.forwards.forEach { rule ->
+                        ForwardRuleCard(
+                            initial = rule,
+                            status = tab.forwardStatus[rule.id],
+                            stats = if (showDebug) statsMap[rule.id] else null,
+                            onSave = { manager.upsertForward(tab.id, it) },
+                            onToggleEnabled = { enabled ->
+                                manager.upsertForward(tab.id, rule.copy(enabled = enabled))
+                            },
+                            onDelete = { manager.removeForward(tab.id, rule.id) },
+                        )
+                    }
+                }
+
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            manager.upsertForward(
+                                tab.id,
+                                ForwardRule(kind = ForwardKind.Push, bindPort = 0, targetPort = 0, enabled = false),
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        NerdIcon(NerdGlyphs.PLUS, null, size = 16.dp)
+                        Spacer(Modifier.width(4.dp))
+                        Text("推送端口")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            manager.upsertForward(
+                                tab.id,
+                                ForwardRule(kind = ForwardKind.Pull, bindPort = 0, targetPort = 0, enabled = false),
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        NerdIcon(NerdGlyphs.PLUS, null, size = 16.dp)
+                        Spacer(Modifier.width(4.dp))
+                        Text("拉取端口")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ForwardRuleCard(
+    initial: ForwardRule,
+    status: String?,
+    stats: uniffi.simpssh_core.ForwardStats?,
+    onSave: (ForwardRule) -> Unit,
+    onToggleEnabled: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+) {
+    // draft 是用户在输入框里正在改的草稿。enabled 不走 draft,是即点即生效(通过 onToggleEnabled)。
+    // draft 的其它字段要显式点"保存"才会触发 onSave;这样用户中途改字段不会立即打断运行中的转发。
+    var draft by remember(initial.id) { mutableStateOf(initial) }
+    // 父组件 list 里的这条规则被上游(manager)改了(例如 toggle enabled),把最新的 enabled 同步进 draft 显示。
+    LaunchedEffect(initial.enabled) {
+        if (draft.enabled != initial.enabled) draft = draft.copy(enabled = initial.enabled)
+    }
+
+    val isPush = draft.kind == ForwardKind.Push
+    val arrowSummary = remember(draft) { summarizeRule(draft) }
+    val statusLabel = when {
+        status == null && draft.enabled -> "运行中"
+        status == null && !draft.enabled -> "已停用"
+        else -> status ?: ""
+    }
+    val statusColor = when {
+        status == null && draft.enabled -> MaterialTheme.colorScheme.primary
+        status != null && status.startsWith("失败") -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (isPush) "推送端口" else "拉取端口",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    statusLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = statusColor,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = draft.enabled,
+                    onCheckedChange = { onToggleEnabled(it) },
+                )
+                IconButton(onClick = onDelete) {
+                    NerdIcon(NerdGlyphs.TRASH, "删除", size = 18.dp, tint = MaterialTheme.colorScheme.error)
+                }
+            }
+            Text(
+                arrowSummary,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            )
+            // 调试信息:Rust 侧轮询来的计数 + 最近一条事件。规则没启用时 stats 是 null,不显示。
+            if (stats != null) {
+                Text(
+                    "接受 ${stats.accepted.toLong()} · 失败 ${stats.failed.toLong()}" +
+                        (stats.lastEvent?.let { "  ·  $it" } ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            OutlinedTextField(
+                value = draft.name,
+                onValueChange = { draft = draft.copy(name = it) },
+                label = { Text("备注（可选）") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = if (draft.bindPort == 0) "" else draft.bindPort.toString(),
+                    onValueChange = {
+                        val p = it.filter { c -> c.isDigit() }.toIntOrNull()?.coerceIn(0, 65535) ?: 0
+                        draft = draft.copy(bindPort = p)
+                    },
+                    label = { Text(if (isPush) "服务端监听端口" else "本机监听端口") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = if (draft.targetPort == 0) "" else draft.targetPort.toString(),
+                    onValueChange = {
+                        val p = it.filter { c -> c.isDigit() }.toIntOrNull()?.coerceIn(0, 65535) ?: 0
+                        draft = draft.copy(targetPort = p)
+                    },
+                    label = { Text(if (isPush) "本机目标端口" else "服务端目标端口") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            val dirty = draft != initial
+            FilledTonalButton(
+                onClick = { onSave(draft) },
+                enabled = dirty && draft.bindPort in 1..65535 && draft.targetPort in 1..65535,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (dirty) "保存并生效" else "已保存")
+            }
+        }
+    }
+}
+
+private fun summarizeRule(r: ForwardRule): String {
+    val bindPort = if (r.bindPort == 0) "?" else r.bindPort.toString()
+    val targetPort = if (r.targetPort == 0) "?" else r.targetPort.toString()
+    return if (r.kind == ForwardKind.Push) {
+        "服务端 127.0.0.1:$bindPort  →  本机 127.0.0.1:$targetPort"
+    } else {
+        "本机 127.0.0.1:$bindPort  →  服务端 127.0.0.1:$targetPort"
     }
 }
 
@@ -390,7 +670,7 @@ private fun ShellBody(
                 if (bp != bracketedPaste) bracketedPaste = bp
                 if (alt != altScreen) altScreen = alt
                 if (ms != mouseReporting) mouseReporting = ms
-                kotlinx.coroutines.delay(150L)
+                kotlinx.coroutines.delay(MODE_BADGE_POLL_MS)
             }
         }
     }
@@ -948,6 +1228,11 @@ private fun TextFieldValue.newCommittedSlice(next: TextFieldValue): String {
 // 紧凑内边距:手机上每 1dp padding 大约多占 1 个字符列。
 private val TERM_PAD = 4.dp
 
+// Dialog 打开时每秒轮 Rust 侧端口转发统计;短于这个间隔会增加 FFI + mutex 抢占但用户感觉不到差别。
+private const val FORWARD_STATS_POLL_MS: Long = 1000L
+// BP/ALT/MS 模式位在开发者选项开启时才 poll;500ms 够用且每次 3 次 FFI 取整个 term mutex。
+private const val MODE_BADGE_POLL_MS: Long = 500L
+
 // EAW-Ambiguous 字形:Sarasa Mono 按 2 个 cell 的 advance 渲染,但 alacritty 的网格里算 1 个 cell。
 // 这里居中绘制 + 裁剪到 1-cell 槽位,让网格数学和可见像素一致(属于 Sarasa ink 与 alacritty 网格宽度的已知不一致)。
 // 只对 cellWidth==1 的字符生效:下方 check 已显式守卫,所以收录范围可以放宽。
@@ -967,31 +1252,10 @@ private fun isAmbigWideGlyph(codePoint: Int): Boolean = when (codePoint) {
 private const val RUST_DEFAULT_FG = 0xD3D7CF
 private const val RUST_DEFAULT_BG = 0x000000
 
-private fun StyledRow.toAnnotatedString(themeFg: Color, themeBg: Color): AnnotatedString {
-    val b = AnnotatedString.Builder()
-    b.append(text)
-    spans.forEach { sp ->
-        val fgInt = sp.fg.toInt() and 0xFFFFFF
-        val bgInt = sp.bg.toInt() and 0xFFFFFF
-        val fg = if (fgInt == RUST_DEFAULT_FG) themeFg
-                 else Color(0xFF000000.toInt() or fgInt)
-        val bg = if (bgInt == RUST_DEFAULT_BG) themeBg
-                 else Color(0xFF000000.toInt() or bgInt)
-        val flags = sp.flags.toInt()
-        b.addStyle(
-            SpanStyle(
-                color = fg,
-                background = bg,
-                fontWeight = if (flags and 0b0001 != 0) FontWeight.Bold else null,
-                fontStyle = if (flags and 0b0010 != 0) FontStyle.Italic else null,
-                textDecoration = if (flags and 0b0100 != 0) TextDecoration.Underline else null,
-            ),
-            sp.start.toInt(),
-            (sp.start + sp.len).toInt().coerceAtMost(text.length),
-        )
-    }
-    return b.toAnnotatedString()
-}
+// 必须与 core/src/terminal.rs::map_flags 产生的 bitmask 保持一致。
+private const val STYLE_BOLD = 0b0001
+private const val STYLE_ITALIC = 0b0010
+private const val STYLE_UNDERLINE = 0b0100
 
 @Composable
 private fun TerminalRowCanvas(
@@ -1127,9 +1391,9 @@ private fun StyledRow.styleAt(offset: Int, themeFg: Color, themeBg: Color): Span
     return SpanStyle(
         color = fg,
         background = bg,
-        fontWeight = if (flags and 0b0001 != 0) FontWeight.Bold else null,
-        fontStyle = if (flags and 0b0010 != 0) FontStyle.Italic else null,
-        textDecoration = if (flags and 0b0100 != 0) TextDecoration.Underline else null,
+        fontWeight = if (flags and STYLE_BOLD != 0) FontWeight.Bold else null,
+        fontStyle = if (flags and STYLE_ITALIC != 0) FontStyle.Italic else null,
+        textDecoration = if (flags and STYLE_UNDERLINE != 0) TextDecoration.Underline else null,
     )
 }
 

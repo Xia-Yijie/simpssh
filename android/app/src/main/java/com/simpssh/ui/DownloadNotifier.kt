@@ -2,6 +2,7 @@ package com.simpssh.ui
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -40,14 +41,29 @@ internal class DownloadNotifier(private val ctx: Context) {
         runCatching { manager.notify(id, builder.build()) }
     }
 
-    fun done(id: Int, name: String, total: Long) {
+    // contentIntent 非 null 时作为"点击通知触发"的 PendingIntent。用于下载完成后需要
+    // 拉起 Activity 的场景(安装 APK / 用系统默认 app 打开):Android 10+ 从后台直接
+    // startActivity 会被静默屏蔽,通过通知点击走用户手势路径不受限。tapHint 作为
+    // 标题的后半段,例如 "点击安装" / "点击打开"。
+    fun done(
+        id: Int,
+        name: String,
+        total: Long,
+        contentIntent: PendingIntent? = null,
+        tapHint: String? = null,
+    ) {
         progressBuilder = null
+        val title = if (contentIntent != null && tapHint != null) "已下载 · $tapHint" else "已下载"
         val nb = NotificationCompat.Builder(ctx, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle("已下载")
+            .setContentTitle(title)
             .setContentText("$name  ${humanBytes(total)}")
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(
+                if (contentIntent != null) NotificationCompat.PRIORITY_DEFAULT
+                else NotificationCompat.PRIORITY_LOW
+            )
+            .apply { if (contentIntent != null) setContentIntent(contentIntent) }
             .build()
         runCatching { manager.notify(id, nb) }
     }

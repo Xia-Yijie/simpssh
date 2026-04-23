@@ -784,6 +784,14 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -847,11 +855,19 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_simpssh_core_fn_method_sshsession_disconnect(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_simpssh_core_fn_method_sshsession_get_forward_stats(`ptr`: Pointer,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_simpssh_core_fn_method_sshsession_is_closed(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_simpssh_core_fn_method_sshsession_read(`ptr`: Pointer,`timeoutMs`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_simpssh_core_fn_method_sshsession_resize(`ptr`: Pointer,`cols`: Short,`rows`: Short,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_simpssh_core_fn_method_sshsession_start_local_forward(`ptr`: Pointer,`id`: RustBuffer.ByValue,`bindPort`: Short,`targetPort`: Short,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_simpssh_core_fn_method_sshsession_start_remote_forward(`ptr`: Pointer,`id`: RustBuffer.ByValue,`bindPort`: Short,`targetPort`: Short,uniffi_out_err: UniffiRustCallStatus, 
+    ): Short
+    fun uniffi_simpssh_core_fn_method_sshsession_stop_forward(`ptr`: Pointer,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_simpssh_core_fn_method_sshsession_write(`ptr`: Pointer,`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1025,11 +1041,19 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_disconnect(
     ): Short
+    fun uniffi_simpssh_core_checksum_method_sshsession_get_forward_stats(
+    ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_is_closed(
     ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_read(
     ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_resize(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_sshsession_start_local_forward(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_sshsession_start_remote_forward(
+    ): Short
+    fun uniffi_simpssh_core_checksum_method_sshsession_stop_forward(
     ): Short
     fun uniffi_simpssh_core_checksum_method_sshsession_write(
     ): Short
@@ -1121,6 +1145,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_simpssh_core_checksum_method_sshsession_disconnect() != 58543.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_simpssh_core_checksum_method_sshsession_get_forward_stats() != 33061.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_simpssh_core_checksum_method_sshsession_is_closed() != 54684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1128,6 +1155,15 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_method_sshsession_resize() != 38769.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_sshsession_start_local_forward() != 51701.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_sshsession_start_remote_forward() != 47448.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_simpssh_core_checksum_method_sshsession_stop_forward() != 59948.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_simpssh_core_checksum_method_sshsession_write() != 3168.toShort()) {
@@ -2224,11 +2260,19 @@ public interface SshSessionInterface {
     
     fun `disconnect`()
     
+    fun `getForwardStats`(`id`: kotlin.String): ForwardStats?
+    
     fun `isClosed`(): kotlin.Boolean
     
     fun `read`(`timeoutMs`: kotlin.UInt): kotlin.ByteArray
     
     fun `resize`(`cols`: kotlin.UShort, `rows`: kotlin.UShort)
+    
+    fun `startLocalForward`(`id`: kotlin.String, `bindPort`: kotlin.UShort, `targetPort`: kotlin.UShort)
+    
+    fun `startRemoteForward`(`id`: kotlin.String, `bindPort`: kotlin.UShort, `targetPort`: kotlin.UShort): kotlin.UShort
+    
+    fun `stopForward`(`id`: kotlin.String)
     
     fun `write`(`bytes`: kotlin.ByteArray)
     
@@ -2327,6 +2371,18 @@ open class SshSession: Disposable, AutoCloseable, SshSessionInterface {
     
     
 
+    override fun `getForwardStats`(`id`: kotlin.String): ForwardStats? {
+            return FfiConverterOptionalTypeForwardStats.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_sshsession_get_forward_stats(
+        it, FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `isClosed`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithPointer {
@@ -2358,6 +2414,42 @@ open class SshSession: Disposable, AutoCloseable, SshSessionInterface {
     uniffiRustCallWithError(SshException) { _status ->
     UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_sshsession_resize(
         it, FfiConverterUShort.lower(`cols`),FfiConverterUShort.lower(`rows`),_status)
+}
+    }
+    
+    
+
+    
+    @Throws(SshException::class)override fun `startLocalForward`(`id`: kotlin.String, `bindPort`: kotlin.UShort, `targetPort`: kotlin.UShort)
+        = 
+    callWithPointer {
+    uniffiRustCallWithError(SshException) { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_sshsession_start_local_forward(
+        it, FfiConverterString.lower(`id`),FfiConverterUShort.lower(`bindPort`),FfiConverterUShort.lower(`targetPort`),_status)
+}
+    }
+    
+    
+
+    
+    @Throws(SshException::class)override fun `startRemoteForward`(`id`: kotlin.String, `bindPort`: kotlin.UShort, `targetPort`: kotlin.UShort): kotlin.UShort {
+            return FfiConverterUShort.lift(
+    callWithPointer {
+    uniffiRustCallWithError(SshException) { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_sshsession_start_remote_forward(
+        it, FfiConverterString.lower(`id`),FfiConverterUShort.lower(`bindPort`),FfiConverterUShort.lower(`targetPort`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `stopForward`(`id`: kotlin.String)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_simpssh_core_fn_method_sshsession_stop_forward(
+        it, FfiConverterString.lower(`id`),_status)
 }
     }
     
@@ -2874,6 +2966,42 @@ public object FfiConverterTypeDirEntry: FfiConverterRustBuffer<DirEntry> {
 
 
 
+data class ForwardStats (
+    var `accepted`: kotlin.ULong, 
+    var `failed`: kotlin.ULong, 
+    var `lastEvent`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeForwardStats: FfiConverterRustBuffer<ForwardStats> {
+    override fun read(buf: ByteBuffer): ForwardStats {
+        return ForwardStats(
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ForwardStats) = (
+            FfiConverterULong.allocationSize(value.`accepted`) +
+            FfiConverterULong.allocationSize(value.`failed`) +
+            FfiConverterOptionalString.allocationSize(value.`lastEvent`)
+    )
+
+    override fun write(value: ForwardStats, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`accepted`, buf)
+            FfiConverterULong.write(value.`failed`, buf)
+            FfiConverterOptionalString.write(value.`lastEvent`, buf)
+    }
+}
+
+
+
 data class StyleSpan (
     var `start`: kotlin.UInt, 
     var `len`: kotlin.UInt, 
@@ -3100,6 +3228,14 @@ sealed class SshException: kotlin.Exception() {
             get() = "msg=${ `msg` }"
     }
     
+    class Forward(
+        
+        val `msg`: kotlin.String
+        ) : SshException() {
+        override val message
+            get() = "msg=${ `msg` }"
+    }
+    
     class Closed(
         ) : SshException() {
         override val message
@@ -3131,7 +3267,10 @@ public object FfiConverterTypeSshError : FfiConverterRustBuffer<SshException> {
             3 -> SshException.Shell(
                 FfiConverterString.read(buf),
                 )
-            4 -> SshException.Closed()
+            4 -> SshException.Forward(
+                FfiConverterString.read(buf),
+                )
+            5 -> SshException.Closed()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -3149,6 +3288,11 @@ public object FfiConverterTypeSshError : FfiConverterRustBuffer<SshException> {
                 + FfiConverterString.allocationSize(value.`msg`)
             )
             is SshException.Shell -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+            is SshException.Forward -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`msg`)
@@ -3177,13 +3321,82 @@ public object FfiConverterTypeSshError : FfiConverterRustBuffer<SshException> {
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
             }
-            is SshException.Closed -> {
+            is SshException.Forward -> {
                 buf.putInt(4)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is SshException.Closed -> {
+                buf.putInt(5)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
+    override fun read(buf: ByteBuffer): kotlin.String? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterString.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.String?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.String?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeForwardStats: FfiConverterRustBuffer<ForwardStats?> {
+    override fun read(buf: ByteBuffer): ForwardStats? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeForwardStats.read(buf)
+    }
+
+    override fun allocationSize(value: ForwardStats?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeForwardStats.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ForwardStats?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeForwardStats.write(value, buf)
+        }
+    }
 }
 
 

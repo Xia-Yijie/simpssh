@@ -11,7 +11,12 @@ internal class SftpCache(ctx: Context) {
     private val root = File(ctx.cacheDir, "sftp-cache").apply { mkdirs() }
     @Volatile private var bytesSinceLastTrim: Long = 0
 
-    init { cleanWritingOrphans() }
+    init {
+        cleanWritingOrphans()
+        // 启动时先强制 trim 一次:前一次进程死前 bytesSinceLastTrim 没攒够就退出,
+        // 缓存目录可能已经超过 cap,不主动修复的话要等下一次写入累计到 TRIM_BUDGET。
+        trimNow(MAX_CACHE_BYTES)
+    }
 
     fun keyFor(server: Server, entry: DirEntry): String {
         val raw = "${server.host}|${server.user}|${entry.path}|${entry.size}|${entry.mtime}"
@@ -37,10 +42,14 @@ internal class SftpCache(ctx: Context) {
         bytesSinceLastTrim += bytes.size
     }
 
-    /// 写入累计过 TRIM_BUDGET 才真跑,避免每张预览都扫目录 + stat。保留最新一条,
-    /// 防单文件 > cap 时把刚下完的自己淘汰。
+    /// 写入累计过 TRIM_BUDGET 才真跑,避免每张预览都扫目录 + stat。
     fun trim(maxBytes: Long) {
         if (bytesSinceLastTrim < TRIM_BUDGET) return
+        trimNow(maxBytes)
+    }
+
+    /// 保留最新一条,防单文件 > cap 时把刚下完的自己淘汰。
+    private fun trimNow(maxBytes: Long) {
         bytesSinceLastTrim = 0
         data class Entry(val file: File, val size: Long, val mtime: Long)
         val snaps = root.listFiles()

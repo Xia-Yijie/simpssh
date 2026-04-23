@@ -9,6 +9,8 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import android.content.Context
 import com.simpssh.SessionService
+import com.simpssh.data.ForwardKind
+import com.simpssh.data.ForwardRule
 import com.simpssh.data.InitScript
 import com.simpssh.data.Server
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,6 +45,11 @@ class TabState(
     var shellStatus by mutableStateOf("连接中…")
     var sshSession: SshSession? = null
     var term: TerminalView? = null
+    // 会话期临时端口转发。每条规则独立控制启/停,断开时由 SshSession.disconnect() 统一回收;
+    // 重连会按当前 enabled 状态重新注册。
+    val forwards: SnapshotStateList<ForwardRule> = mutableStateListOf()
+    // rule.id -> null 表示运行中,非 null 表示错误消息("未启动" / "失败: ...")。
+    val forwardStatus: SnapshotStateMap<String, String?> = mutableStateMapOf()
     val rows: SnapshotStateList<StyledRow> = mutableStateListOf()
     var cursorRow: Int by mutableStateOf(0)
     var cursorCol: Int by mutableStateOf(0)
@@ -82,12 +89,14 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
     val tabs: SnapshotStateList<TabState> = mutableStateListOf()
     var activeId by mutableStateOf<String?>(null)
 
+    init { currentRef = this }
+
     fun open(server: Server, script: InitScript?): String {
         val tab = TabState(server = server, script = script)
         tab.shellStatus = "等待终端尺寸…"
         tabs.add(tab)
         activeId = tab.id
-        if (tabs.size == 1) SessionService.start(ctx)
+        if (tabs.size == 1) SessionService.start(ctx) else SessionService.refresh(ctx)
         return tab.id
     }
 
@@ -110,10 +119,51 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
 
             runInitScripts(s, tab.script)
             drainStartupOutput(tab, s, t)
+            reapplyForwards(tab)
             tab.readerJob = scope.launch(Dispatchers.IO) { runReader(tab, s, t) }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) { tab.shellStatus = formatError("连接", e) }
         }
+    }
+
+    // 重连 / 首次连接后,把已存在的 session 级规则按当前 enabled 状态重新注册一遍。
+    // Rust 侧原本注册的转发在 disconnect 时已清掉,Kotlin 这边的 enabled 状态是权威源。
+    private fun reapplyForwards(tab: TabState) {
+        val s = tab.sshSession ?: return
+        for (rule in tab.forwards.toList()) {
+            if (rule.enabled) applyRuleStart(tab, s, rule)
+            else tab.forwardStatus[rule.id] = "未启动"
+        }
+    }
+
+    private fun applyRuleStart(tab: TabState, s: SshSession, rule: ForwardRule) {
+        val err = runCatching {
+            val bp = rule.bindPort.toUShort()
+            val tp = rule.targetPort.toUShort()
+            when (rule.kind) {
+                ForwardKind.Pull -> s.startLocalForward(rule.id, bp, tp)
+                ForwardKind.Push -> s.startRemoteForward(rule.id, bp, tp)
+            }
+        }.exceptionOrNull()
+        tab.forwardStatus[rule.id] = err?.let { formatError("转发", it) }
+    }
+
+    // 新增或替换同 id 规则。会把已有同 id 的先 stop 再启;非 enabled 直接存起来不启动。
+    fun upsertForward(tabId: String, rule: ForwardRule) {
+        val tab = tabs.firstOrNull { it.id == tabId } ?: return
+        val s = tab.sshSession
+        runCatching { s?.stopForward(rule.id) }
+        val idx = tab.forwards.indexOfFirst { it.id == rule.id }
+        if (idx >= 0) tab.forwards[idx] = rule else tab.forwards.add(rule)
+        if (s != null && rule.enabled) applyRuleStart(tab, s, rule)
+        else tab.forwardStatus[rule.id] = if (s == null) "未连接" else "未启动"
+    }
+
+    fun removeForward(tabId: String, ruleId: String) {
+        val tab = tabs.firstOrNull { it.id == tabId } ?: return
+        runCatching { tab.sshSession?.stopForward(ruleId) }
+        tab.forwards.removeAll { it.id == ruleId }
+        tab.forwardStatus.remove(ruleId)
     }
 
     private fun runInitScripts(s: SshSession, script: InitScript?) {
@@ -578,7 +628,7 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         teardownSftp(tab)
         tabs.remove(tab)
         if (activeId == id) activeId = tabs.lastOrNull()?.id
-        if (tabs.isEmpty()) SessionService.stop(ctx)
+        if (tabs.isEmpty()) SessionService.stop(ctx) else SessionService.refresh(ctx)
     }
 
     fun activate(id: String) {
@@ -592,6 +642,16 @@ class SessionManager(private val scope: CoroutineScope, private val ctx: Context
         }
         tabs.clear()
         activeId = null
+        if (currentRef === this) currentRef = null
         SessionService.stop(ctx)
+    }
+
+    companion object {
+        // SessionService 在同进程里通过这个引用找到当前的 manager 以响应通知 action。
+        // Activity 销毁 → compose 作用域走 disposeAll 清空;进程死 → 引用随之消失。
+        @Volatile
+        private var currentRef: SessionManager? = null
+
+        fun currentOrNull(): SessionManager? = currentRef
     }
 }
